@@ -177,7 +177,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 **M1 — End-to-end tracer bullet** *(accept: `--sample 30s` renders on both adapters, brightness follows loudness, correct audio)*
 
 - [x] **Step 5** - Audio decode: symphonia → mono f32 PCM *(prerequisite: Step 4)*
-- [ ] **Step 6** - Minimal FeatureTimeline: RMS only, hop aligned to video frames
+- [x] **Step 6** - Minimal FeatureTimeline: RMS only, hop aligned to video frames
   *(prerequisite: Step 5)*
 - [ ] **Step 7** - wgpu offscreen renderer: adapter selection, readback with row
   padding *(prerequisite: Step 1)*
