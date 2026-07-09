@@ -9,6 +9,8 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+image.workspace = true
+lofty.workspace = true
 serde.workspace = true
 strsim.workspace = true
 thiserror.workspace = true

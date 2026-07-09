@@ -171,7 +171,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 - [x] **Step 2** - Config module: TOML schema, strict unknown-key rejection with
   suggestions, precedence merging *(prerequisite: Step 1)*
 - [x] **Step 3** - ffmpeg preflight check *(prerequisite: Step 1)*
-- [ ] **Step 4** - `avz probe`: lofty tags, duration, cover art; CC0 fixture lands
+- [x] **Step 4** - `avz probe`: lofty tags, duration, cover art; CC0 fixture lands
   *(prerequisite: Step 1)*
 
 **M1 — End-to-end tracer bullet** *(accept: `--sample 30s` renders on both adapters, brightness follows loudness, correct audio)*
@@ -220,9 +220,15 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 ## Open Questions
 
-- [ ] **Q1** - Which CC0 mp3 becomes the repo fixture? Needs ID3v2 tags and
-  embedded cover art to exercise `probe`; may need to be authored (a few seconds
-  of generated tones tagged with `lofty`).
+- [x] **Q1** - Which CC0 mp3 becomes the repo fixture? **Resolved in Step 4: the
+  project authors its own.** No existing CC0 track carried both ID3v2 tags and
+  embedded cover art, and vendoring one would have imported a licence to audit.
+  `scripts/make-test-fixture.sh` synthesizes `assets/fixtures/tone-tagged.mp3`
+  (5 s, 44.1 kHz stereo, ID3v2.3 tags, 256×256 PNG cover) and its untagged twin
+  from `sin`/`exp` expressions and a generated gradient — nothing sampled,
+  everything CC0. The audio is a decaying 60 Hz kick under a 1 kHz tone, so it
+  also serves the Step 10 render test: loudness visibly moves and the bass band
+  is separable from the mid.
 - [ ] **Q2** - Exact `pulse` and `nebula` default parameter values — resolved
   during the M2 manual tuning pass against reference tracks.
 
