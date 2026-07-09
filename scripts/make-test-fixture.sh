@@ -32,6 +32,11 @@ readonly ALBUM="Public Domain Tones"
 # 60 Hz kick decaying every 500 ms, plus a 1 kHz tone breathing once a second.
 readonly TONES="0.55*sin(2*PI*60*t)*exp(-6*mod(t,0.5))+0.18*sin(2*PI*1000*t)*(0.4+0.6*exp(-3*mod(t,1)))"
 
+# A tone in the left channel and silence in the right. The mono mixdown must
+# average the channels, so decoding this must halve the amplitude. A decoder
+# that took channel 0, or summed the channels, would produce twice as much.
+readonly LEFT_ONLY="0.5*sin(2*PI*1000*t)|0"
+
 work=$(mktemp -d)
 trap 'rm -rf "${work}"' EXIT
 
@@ -67,6 +72,16 @@ ffmpeg -hide_banner -loglevel error -y \
     -map_metadata -1 -fflags +bitexact -flags:a +bitexact \
     -id3v2_version 0 -write_id3v1 0 \
     "${fixtures}/tone-untagged.mp3"
+
+# 128 kbps, not 64: the mixdown test asserts on amplitude, and a 1 s file is
+# small enough that the extra bitrate costs ~8 KB and buys a cleaner tone.
+echo "==> Writing tone-left-only.mp3 (1 s, tone in the left channel only)"
+ffmpeg -hide_banner -loglevel error -y \
+    -f lavfi -i "aevalsrc='${LEFT_ONLY}':s=44100:d=1" \
+    -c:a libmp3lame -b:a 128k -ar 44100 -ac 2 \
+    -map_metadata -1 -fflags +bitexact -flags:a +bitexact \
+    -id3v2_version 0 -write_id3v1 0 \
+    "${fixtures}/tone-left-only.mp3"
 
 echo
 ls -l "${fixtures}"

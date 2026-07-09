@@ -64,6 +64,10 @@ exists, or `TODO` / `manual` with a reason.
 
 | Risk / failure mode | User impact | Test layer | Coverage |
 |---|---|---|---|
+| Stereo mixdown takes one channel or sums instead of averaging | Analysis sees the wrong loudness; hard-panned material drives the visuals twice as hard | Unit | `stereo_downmix_is_channel_average`, `channel_average_is_exact_for_interleaved_frames`, `mono_source_passes_through_unmixed` |
+| Decoded sample count disagrees with the reported duration | Cumulative audio/visual drift over a long song | Unit | `decodes_fixture_to_expected_duration`, `mono_output_length_matches_duration_times_rate`, `a_stereo_source_decodes_to_one_channel` |
+| Truncated or corrupt mp3 panics, or is silently analyzed short | Crash, or visuals rendered against audio that keeps playing | Unit | `truncated_mp3_yields_input_error_not_panic`, `non_mp3_bytes_rejected` |
+| Decode resamples, or grows beyond mp3 | Hop math drifts off video frame timestamps; the binary carries codecs avz can never mux | Unit + quality hook | `a_stereo_source_decodes_to_one_channel`, `scripts/quality.d/40-decode-stays-mp3-only.sh` |
 | Band energies map to wrong frequency ranges | Visuals react to the wrong instruments; subtly off, never obviously broken | Unit | TODO |
 | Onset detection fires late or misses hits | Motion lags the beat — the core promise fails | Unit + manual | TODO |
 | Envelope follower attack/decay math wrong | Motion is twitchy or sluggish | Unit | TODO |

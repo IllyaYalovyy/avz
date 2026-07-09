@@ -13,6 +13,7 @@ image.workspace = true
 lofty.workspace = true
 serde.workspace = true
 strsim.workspace = true
+symphonia.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true

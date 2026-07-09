@@ -19,6 +19,9 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png"]
 lofty = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 strsim = "0.11"
+# mp3 only: avz decodes nothing else, and `id3v2` lets the demuxer skip the tag
+# that `probe` already read. The default feature set adds flac/ogg/wav/vorbis.
+symphonia = { version = "0.6", default-features = false, features = ["mp3", "id3v2"] }
 thiserror = "2.0"
 toml = "1.0"
 tracing = "0.1"
