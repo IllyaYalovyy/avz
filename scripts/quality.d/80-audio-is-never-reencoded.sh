@@ -57,7 +57,14 @@ while IFS= read -r source; do
 done < <(find crates -path '*/src/*' -name '*.rs' -type f | sort)
 
 # The invariant is only guarded if the flag is actually there to guard.
-if ! strip_tests "${home}" | grep -q '"-c:a"'; then
+#
+# The argv is collected before it is searched, never piped into `grep -q`: a
+# matching `grep -q` exits at once, awk dies of SIGPIPE, and `set -o pipefail`
+# then reports the pipeline as failed — which made this check fail at random on
+# a source file that does contain `-c:a`.
+argv=$(strip_tests "${home}")
+
+if ! grep -q '"-c:a"' <<<"${argv}"; then
     echo "error: ${home} no longer passes -c:a to ffmpeg." >&2
     echo "hint: the mp3 stream must be muxed with \`-c:a copy\` (AGENTS.md)." >&2
     status=1
