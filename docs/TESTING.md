@@ -37,6 +37,14 @@ what makes this stable across machines; never run golden tests on a hardware
 adapter, because GPU float differences are expected. This catches shader
 regressions cheaply.
 
+**Adapter selection.** `--adapter auto|gpu|software` behaves differently
+depending on what the host has, so a developer machine with a GPU never walks
+the fallback path. `scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh`
+points `VK_DRIVER_FILES` at the lavapipe ICD, which makes any host look GPU-less,
+and sets `AVZ_TEST_EXPECT_NO_GPU=1` so the render tests demand the fallback
+rather than tolerating either adapter. That turns "needs a GPU-less host" from a
+manual check into a local one.
+
 **Integration.** A tiny CC0 test mp3 (about 5 s) lives in the repo at
 `assets/fixtures/tone-tagged.mp3`, synthesized by `./scripts/make-test-fixture.sh`
 and described in `assets/fixtures/README.md`. CI runs a
@@ -75,7 +83,12 @@ exists, or `TODO` / `manual` with a reason.
 | Analysis frames do not land on video frame timestamps | Cumulative audio/visual drift over a long song | Unit | `analysis_frames_never_drift_from_the_video_frame_clock`, `a_burst_lands_on_the_video_frame_nearest_it`, `one_feature_frame_per_video_frame`, `a_partial_final_video_frame_still_gets_a_feature_frame` |
 | Analysis windows leave gaps between hops at low fps | A hit landing in a gap never reaches the visuals | Unit | `no_audio_falls_between_windows_when_the_hop_exceeds_the_window` |
 | RMS is wrong in a way that still looks plausible | Brightness follows nothing in particular | Unit | `a_constant_sine_has_the_same_rms_on_every_frame`, `a_dc_signal_has_an_rms_equal_to_its_amplitude`, `a_loud_passage_reads_louder_than_a_quiet_one`, `silence_has_zero_rms_and_no_nans` |
-| wgpu readback row padding mishandled (256-byte alignment) | Skewed or garbage frames | Integration | TODO |
+| wgpu readback row padding mishandled (256-byte alignment) | Skewed or garbage frames | Unit + integration + quality hook | `readback_handles_non_multiple_of_256_row_widths` (both layers), `a_row_stride_rounds_up_to_the_256_byte_alignment`, `an_already_aligned_row_is_not_padded`, `scripts/quality.d/50-readback-padding-lives-in-one-place.sh` |
+| Readback buffer size and row layout silently disagree | A sheared frame nobody notices until the video is watched | Unit | `a_buffer_that_is_not_the_padded_size_is_a_render_error` |
+| `--adapter gpu` quietly renders on lavapipe | An 8 fps render the user explicitly ruled out | Unit + integration | `gpu_refuses_a_software_adapter_and_software_refuses_a_hardware_one`, `asking_for_gpu_never_yields_a_software_adapter` |
+| `--adapter software` quietly renders on the GPU | Golden frames pass locally and fail everywhere else | Unit + integration | `gpu_refuses_a_software_adapter_and_software_refuses_a_hardware_one`, `the_software_adapter_is_a_cpu_adapter_and_needs_no_warning` |
+| Software fallback happens without a warning, or warns when asked for | The user cannot tell a slow render from a broken one, or is nagged every render | Unit + integration + quality hook | `only_an_auto_render_that_lands_on_software_is_worth_warning_about`, `auto_always_finds_an_adapter_and_flags_a_software_fallback`, `a_gpu_less_host_falls_back_to_software_and_says_so`, `scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh` |
+| A second render backend creeps in (dx12/metal/gles) | Shaders run on an untested path; golden frames stop meaning anything | Quality hook | `scripts/quality.d/60-render-is-vulkan-only.sh` |
 | Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | TODO |
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames | TODO |
 | ffmpeg missing at runtime | Tool fails late with a cryptic error | Integration (preflight) | `missing_ffmpeg_fails_with_the_fedora_install_hint`, `render_without_ffmpeg_fails_with_the_fedora_install_hint`, `render_checks_for_ffmpeg_before_doing_any_work` |

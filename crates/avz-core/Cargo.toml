@@ -11,12 +11,14 @@ authors.workspace = true
 [dependencies]
 image.workspace = true
 lofty.workspace = true
+pollster.workspace = true
 serde.workspace = true
 strsim.workspace = true
 symphonia.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 tracing.workspace = true
+wgpu.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -179,7 +179,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 - [x] **Step 5** - Audio decode: symphonia → mono f32 PCM *(prerequisite: Step 4)*
 - [x] **Step 6** - Minimal FeatureTimeline: RMS only, hop aligned to video frames
   *(prerequisite: Step 5)*
-- [ ] **Step 7** - wgpu offscreen renderer: adapter selection, readback with row
+- [x] **Step 7** - wgpu offscreen renderer: adapter selection, readback with row
   padding *(prerequisite: Step 1)*
 - [ ] **Step 8** - ffmpeg encoder subprocess: rawvideo stdin, `-c:a copy`, `.part`
   rename, stderr monitoring *(prerequisite: Step 3)*

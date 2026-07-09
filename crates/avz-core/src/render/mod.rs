@@ -6,6 +6,15 @@
 //! (`VISION.md` §5.3, §6, §7).
 //!
 //! Animation time is always `frame_index / fps`, never wall clock. Readback
-//! row-padding (256-byte alignment) is handled in exactly one place.
+//! row-padding (256-byte alignment) is handled in exactly one place:
+//! [`readback::RowLayout`].
 //!
 //! Populated by RFC-001 Steps 7, 14, 17, 18, 19, and 20.
+
+pub mod adapter;
+pub mod offscreen;
+pub mod readback;
+
+pub use adapter::{AdapterChoice, AdapterKind};
+pub use offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+pub use readback::RowLayout;
