@@ -6,3 +6,7 @@
 //! normalization (`VISION.md` §5.1).
 //!
 //! Populated by RFC-001 Steps 5, 6, 11, 12, and 13.
+
+pub mod decode;
+
+pub use decode::{DecodedAudio, decode};
