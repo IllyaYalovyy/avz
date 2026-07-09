@@ -74,8 +74,8 @@ exists, or `TODO` / `manual` with a reason.
 | ffmpeg dies mid-render | Half-written `.mp4` left on disk | Integration | TODO |
 | Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (ffprobe codec assert) | TODO |
 | Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |
-| Config precedence wrong (`--set` loses to file) | Reproducible renders are not reproducible | Unit | TODO |
-| Unknown TOML key silently ignored | Typo'd param silently does nothing | Unit | TODO |
+| Config precedence wrong (`--set` loses to file) | Reproducible renders are not reproducible | Unit | `set_override_beats_config_file_value`, `cli_flag_beats_set_override`, `a_silent_layer_does_not_erase_a_lower_one` |
+| Unknown TOML key silently ignored | Typo'd param silently does nothing | Unit | `unknown_toml_key_rejected_with_suggestion`, `unknown_set_key_is_rejected_with_a_suggestion_and_the_assignment` |
 | Missing ID3 tags | Crash instead of a warned-and-skipped text card | Unit | TODO |
 | lavapipe unavailable under `--adapter software` | Hard failure on headless boxes | Manual (documented) | manual |
 
