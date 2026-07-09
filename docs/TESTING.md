@@ -37,7 +37,9 @@ what makes this stable across machines; never run golden tests on a hardware
 adapter, because GPU float differences are expected. This catches shader
 regressions cheaply.
 
-**Integration.** A tiny CC0 test mp3 (about 5 s) lives in the repo. CI runs a
+**Integration.** A tiny CC0 test mp3 (about 5 s) lives in the repo at
+`assets/fixtures/tone-tagged.mp3`, synthesized by `./scripts/make-test-fixture.sh`
+and described in `assets/fixtures/README.md`. CI runs a
 full `--sample 2s` render at 320×180 on the software adapter and asserts
 `ffprobe` sees the expected duration, one video stream, one audio stream, and an
 audio codec of `mp3` — which proves `-c:a copy` was not silently replaced by a
@@ -77,7 +79,9 @@ exists, or `TODO` / `manual` with a reason.
 | Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |
 | Config precedence wrong (`--set` loses to file) | Reproducible renders are not reproducible | Unit | `set_override_beats_config_file_value`, `cli_flag_beats_set_override`, `a_silent_layer_does_not_erase_a_lower_one` |
 | Unknown TOML key silently ignored | Typo'd param silently does nothing | Unit | `unknown_toml_key_rejected_with_suggestion`, `unknown_set_key_is_rejected_with_a_suggestion_and_the_assignment` |
-| Missing ID3 tags | Crash instead of a warned-and-skipped text card | Unit | TODO |
+| Missing ID3 tags | Crash instead of a warned-and-skipped text card | Unit | `untagged_mp3_reports_missing_tags_instead_of_failing`, `blank_and_whitespace_tag_values_count_as_missing`, `missing_tags_render_as_missing_and_missing_art_as_none` |
+| Unreadable input reported as a cryptic OS error | User cannot tell a bad file from a bad disk | Unit + integration | `a_file_that_lies_about_being_an_mp3_is_an_input_error`, `a_file_of_an_unknown_format_is_an_input_error`, `probe_of_a_missing_file_exits_3` |
+| Cover art picked nondeterministically from a multi-picture tag | Art-reactive presets drift between runs | Unit | `front_cover_wins_over_other_pictures_regardless_of_order`, `a_tag_without_a_front_cover_falls_back_to_the_first_picture` |
 | lavapipe unavailable under `--adapter software` | Hard failure on headless boxes | Manual (documented) | manual |
 
 ## Local Quality Gate

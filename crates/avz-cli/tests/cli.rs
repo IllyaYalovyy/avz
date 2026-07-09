@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt as _;
+use std::path::{Path, PathBuf};
 
 use assert_cmd::Command;
 use predicates::prelude::PredicateBooleanExt as _;
@@ -13,6 +14,13 @@ use tempfile::TempDir;
 
 fn avz() -> Command {
     Command::cargo_bin("avz").expect("avz binary builds")
+}
+
+/// A committed CC0 fixture. See `assets/fixtures/README.md`.
+fn fixture(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/fixtures")
+        .join(name)
 }
 
 /// A `PATH` holding nothing at all, so `ffmpeg` cannot be found on it.
@@ -102,10 +110,67 @@ fn probe_does_not_require_ffmpeg() {
 
     avz()
         .env("PATH", path.path())
-        .args(["probe", "x.mp3"])
+        .arg("probe")
+        .arg(fixture("tone-tagged.mp3"))
         .assert()
-        .code(4)
-        .stderr(contains("not implemented"));
+        .success();
+}
+
+/// UT-005: title, artist, album, duration, sample rate, and whether cover art is
+/// embedded — with its mime type and dimensions.
+#[test]
+fn probe_prints_tags_duration_and_cover_art() {
+    avz()
+        .arg("probe")
+        .arg(fixture("tone-tagged.mp3"))
+        .assert()
+        .success()
+        .stdout(contains("Sine Tones"))
+        .stdout(contains("avz test fixture"))
+        .stdout(contains("Public Domain Tones"))
+        .stdout(contains("0:05.04"))
+        .stdout(contains("44100 Hz"))
+        .stdout(contains("2 (stereo)"))
+        .stdout(contains("image/png"))
+        .stdout(contains("256x256"));
+}
+
+/// UT-005: "Missing tags are reported as missing, not as an error."
+#[test]
+fn probe_reports_missing_tags_as_missing_rather_than_failing() {
+    avz()
+        .arg("probe")
+        .arg(fixture("tone-untagged.mp3"))
+        .assert()
+        .success()
+        .stdout(contains("title").and(contains("(missing)")))
+        .stdout(contains("cover art").and(contains("(none)")))
+        // The audio is still described even with no tag to be found.
+        .stdout(contains("44100 Hz"));
+}
+
+/// An input-file problem is exit code 3, not a panic and not a render failure.
+#[test]
+fn probe_of_a_missing_file_exits_3() {
+    avz()
+        .args(["probe", "no-such-song.mp3"])
+        .assert()
+        .code(3)
+        .stderr(contains("no such file"));
+}
+
+#[test]
+fn probe_of_a_file_that_is_not_audio_exits_3() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let path = dir.path().join("not-audio.mp3");
+    fs::write(&path, b"this is not an mp3").expect("write");
+
+    avz()
+        .arg("probe")
+        .arg(&path)
+        .assert()
+        .code(3)
+        .stderr(contains("not a recognized audio file"));
 }
 
 #[test]

@@ -99,7 +99,9 @@ missing, not as an error.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:** `probe_prints_tags_duration_and_cover_art`,
+`probe_reports_missing_tags_as_missing_rather_than_failing`,
+`probe_of_a_missing_file_exits_3`, `probe_does_not_require_ffmpeg`
 
 ## UT-006: Reproduce a render from a config file
 

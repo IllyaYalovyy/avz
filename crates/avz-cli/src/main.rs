@@ -8,6 +8,7 @@
 
 mod cli;
 mod exit;
+mod probe;
 
 use std::process::ExitCode;
 
@@ -74,12 +75,25 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
             // last one (VISION.md §5.4). Step 8 hands the verified binary to the
             // encoder; for now the check itself is the value.
             avz_core::encode::preflight(avz_core::encode::DEFAULT_PROGRAM)?;
+            not_implemented(cli)
         }
-        Command::Probe(args) => tracing::debug!(input = ?args.input, "probe requested"),
-        Command::Presets(args) => tracing::debug!(name = ?args.name, "presets requested"),
-        Command::Config(args) => tracing::debug!(example = args.example, "config requested"),
+        Command::Probe(args) => {
+            tracing::debug!(input = ?args.input, "probe requested");
+            probe::run(args)
+        }
+        Command::Presets(args) => {
+            tracing::debug!(name = ?args.name, "presets requested");
+            not_implemented(cli)
+        }
+        Command::Config(args) => {
+            tracing::debug!(example = args.example, "config requested");
+            not_implemented(cli)
+        }
     }
+}
 
+/// A command that parses and validates, then politely refuses (`VISION.md` §9).
+fn not_implemented(cli: &Cli) -> anyhow::Result<()> {
     Err(avz_core::Error::NotImplemented {
         command: cli.command.name(),
     }
