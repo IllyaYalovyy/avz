@@ -1,0 +1,75 @@
+# AI / Chatbot / Agent files
+.claude/
+.claude_*
+.kiro/
+.aim/
+.cursor/
+.copilot/
+.aider*
+.codex/
+.ktask/
+.ktask/**
+.tabnine/
+.continue/
+.windsurf/
+*.prompt
+*.prompt.md
+*.context
+*.context.md
+.chat_history/
+.ai/
+.agent/
+
+# avz render output and local media
+# Test fixtures under assets/ and tests/ are committed deliberately; add them
+# with `git add -f` if a rule below shadows one.
+/renders/
+*.mp4.part
+*.part
+
+# Build artifacts
+/target/
+/build/
+/dist/
+/out/
+/coverage/
+node_modules/
+pkg/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Secrets and credentials
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+credentials.json
+client_secret*.json
+token.json
+oauth2_tokens/
+secrets/
+.secrets/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.iml
+
+# Logs and reports
+*.log
+logs/
+*.profraw
+*.profdata
+lcov.info
+tarpaulin-report.html
