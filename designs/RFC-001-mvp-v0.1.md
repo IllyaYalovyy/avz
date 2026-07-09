@@ -161,6 +161,8 @@ and lavapipe behavior on a genuinely GPU-less host (manual, documented).
 ## Development Plan
 
 One checkbox = one GitHub issue. Mark `[x]` when the issue closes.
+Numbering is aligned: **Step N is GitHub issue #N** (filed 2026-07-08).
+Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 **M0 — Skeleton & plumbing** *(accept: `avz probe song.mp3` works; `avz render` fails politely)*
 
