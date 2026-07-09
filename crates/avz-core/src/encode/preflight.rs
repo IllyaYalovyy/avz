@@ -181,7 +181,32 @@ ffmpeg version N-109212-g1a2b3c4de Copyright (c) 2000-2026 the FFmpeg developers
             let path = dir.join("ffmpeg");
             fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write fake ffmpeg");
             fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+            wait_until_executable(&path);
             path
+        }
+
+        /// Wait out `ETXTBSY` on the script we just wrote.
+        ///
+        /// `fs::write` has closed its descriptor by the time it returns, but any
+        /// sibling test thread that forked inside that window handed its child an
+        /// inherited copy, and Linux refuses to `exec` a file that any process
+        /// still holds open for writing. The child drops it on its own `exec` a
+        /// few microseconds later, and the condition cannot recur afterwards
+        /// because no descriptor to this file remains anywhere.
+        ///
+        /// This is an artifact of spawning processes from a threaded test binary,
+        /// not anything `preflight` does — so the tests wait it out rather than
+        /// teaching production code to retry.
+        fn wait_until_executable(path: &Path) {
+            for _ in 0..1_000 {
+                match Command::new(path).arg("-version").output() {
+                    Err(err) if err.kind() == io::ErrorKind::ExecutableFileBusy => {
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                    _ => return,
+                }
+            }
+            panic!("{}: still busy after a second", path.display());
         }
 
         #[test]

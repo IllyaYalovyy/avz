@@ -72,7 +72,9 @@ exists, or `TODO` / `manual` with a reason.
 | Onset detection fires late or misses hits | Motion lags the beat — the core promise fails | Unit + manual | TODO |
 | Envelope follower attack/decay math wrong | Motion is twitchy or sluggish | Unit | TODO |
 | Normalization divides by zero on silence | Panic or NaN frames | Unit | TODO |
-| Analysis frames do not land on video frame timestamps | Cumulative audio/visual drift over a long song | Unit | TODO |
+| Analysis frames do not land on video frame timestamps | Cumulative audio/visual drift over a long song | Unit | `analysis_frames_never_drift_from_the_video_frame_clock`, `a_burst_lands_on_the_video_frame_nearest_it`, `one_feature_frame_per_video_frame`, `a_partial_final_video_frame_still_gets_a_feature_frame` |
+| Analysis windows leave gaps between hops at low fps | A hit landing in a gap never reaches the visuals | Unit | `no_audio_falls_between_windows_when_the_hop_exceeds_the_window` |
+| RMS is wrong in a way that still looks plausible | Brightness follows nothing in particular | Unit | `a_constant_sine_has_the_same_rms_on_every_frame`, `a_dc_signal_has_an_rms_equal_to_its_amplitude`, `a_loud_passage_reads_louder_than_a_quiet_one`, `silence_has_zero_rms_and_no_nans` |
 | wgpu readback row padding mishandled (256-byte alignment) | Skewed or garbage frames | Integration | TODO |
 | Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | TODO |
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames | TODO |
