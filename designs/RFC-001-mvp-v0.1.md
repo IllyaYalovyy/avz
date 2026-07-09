@@ -170,7 +170,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
   stubbed subcommands, exit codes, tracing, CI green *(prerequisite: -)*
 - [x] **Step 2** - Config module: TOML schema, strict unknown-key rejection with
   suggestions, precedence merging *(prerequisite: Step 1)*
-- [ ] **Step 3** - ffmpeg preflight check *(prerequisite: Step 1)*
+- [x] **Step 3** - ffmpeg preflight check *(prerequisite: Step 1)*
 - [ ] **Step 4** - `avz probe`: lofty tags, duration, cover art; CC0 fixture lands
   *(prerequisite: Step 1)*
 

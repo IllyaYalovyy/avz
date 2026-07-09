@@ -5,3 +5,7 @@
 //! written to `out.mp4.part` and renamed on success (`VISION.md` §5.4).
 //!
 //! Populated by RFC-001 Steps 3 and 8.
+
+mod preflight;
+
+pub use preflight::{DEFAULT_PROGRAM, Ffmpeg, preflight};
