@@ -66,7 +66,13 @@ lavapipe. `--adapter gpu` instead fails fast with a clear error.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO (manual: needs a GPU-less host)
+**Regression coverage:** Adapter selection and the fallback flag:
+`a_gpu_less_host_falls_back_to_software_and_says_so`,
+`asking_for_gpu_never_yields_a_software_adapter`,
+`only_an_auto_render_that_lands_on_software_is_worth_warning_about`.
+`scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh` simulates the
+GPU-less host by restricting Vulkan to the lavapipe ICD, so this no longer needs
+one. The warning text itself lands with the CLI render command (RFC-001 Step 21).
 
 ## UT-004: Discover presets and their parameters
 
