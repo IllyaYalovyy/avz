@@ -49,9 +49,25 @@ manual check into a local one.
 `assets/fixtures/tone-tagged.mp3`, synthesized by `./scripts/make-test-fixture.sh`
 and described in `assets/fixtures/README.md`. CI runs a
 full `--sample 2s` render at 320×180 on the software adapter and asserts
-`ffprobe` sees the expected duration, one video stream, one audio stream, and an
-audio codec of `mp3` — which proves `-c:a copy` was not silently replaced by a
-re-encode.
+`ffprobe` sees the expected duration, one video stream, and one audio stream.
+
+**Proving `-c:a copy`.** An audio codec of `mp3` in the output does *not* prove
+the stream was copied: re-encoding an mp3 with `libmp3lame` also reports
+`codec_name=mp3`, so a codec assertion passes straight through a generation of
+quality loss. The bitstream is what tells the truth.
+`muxed_audio_stream_is_copied_not_reencoded` extracts the raw audio packet
+payloads from both the source mp3 and the rendered mp4 (`-c copy -f data`) and
+asserts the muxed bytes are a byte-exact prefix of the original — a prefix, not
+the whole thing, because `-shortest` truncates the audio to the rendered frames.
+`scripts/quality.d/80-audio-is-never-reencoded.sh` guards the same invariant in
+the source, for hosts where ffmpeg cannot run.
+
+**The ffmpeg subprocess.** A shell stand-in for ffmpeg is what makes the failure
+paths testable: a real encoder cannot be made to die on cue, or to hold stdin
+open forever. `crates/avz-core/tests/encode_ffmpeg.rs` uses one to prove the
+output appears only after a clean exit, that a mid-render death removes the
+`.part` file, and that a dropped `Encoder` kills ffmpeg and cleans up. The mux
+test in the same file drives the real system ffmpeg.
 
 **Manual listening pass.** The M2 reference-track ritual: render 3–4 reference
 tracks (something quiet, something dense, a Cold Design track, a Carpathians
@@ -93,8 +109,9 @@ exists, or `TODO` / `manual` with a reason.
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames | TODO |
 | ffmpeg missing at runtime | Tool fails late with a cryptic error | Integration (preflight) | `missing_ffmpeg_fails_with_the_fedora_install_hint`, `render_without_ffmpeg_fails_with_the_fedora_install_hint`, `render_checks_for_ffmpeg_before_doing_any_work` |
 | `ffmpeg` on PATH is not really ffmpeg | Cryptic subprocess failure mid-render | Integration (preflight) | `a_binary_that_is_not_ffmpeg_is_rejected`, `an_ffmpeg_that_exits_nonzero_is_rejected` |
-| ffmpeg dies mid-render | Half-written `.mp4` left on disk | Integration | TODO |
-| Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (ffprobe codec assert) | TODO |
+| ffmpeg dies mid-render, or the finished file cannot be moved into place | Half-written `.mp4` left on disk | Integration | `ffmpeg_death_midrender_leaves_no_output_file`, `a_dropped_encoder_kills_ffmpeg_and_removes_the_part_file`, `a_render_that_cannot_be_moved_into_place_leaves_no_part_file`, `the_output_appears_only_after_a_successful_finish` |
+| ffmpeg's stderr pipe fills while avz waits to write a frame | Render deadlocks with no diagnostic | Integration | `ffmpeg_death_midrender_leaves_no_output_file` (surfaces the drained stderr) |
+| Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (bitstream compare) + unit + quality hook | `muxed_audio_stream_is_copied_not_reencoded`, `the_audio_stream_is_copied_and_never_reencoded`, `scripts/quality.d/80-audio-is-never-reencoded.sh` |
 | Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |
 | Config precedence wrong (`--set` loses to file) | Reproducible renders are not reproducible | Unit | `set_override_beats_config_file_value`, `cli_flag_beats_set_override`, `a_silent_layer_does_not_erase_a_lower_one` |
 | Unknown TOML key silently ignored | Typo'd param silently does nothing | Unit | `unknown_toml_key_rejected_with_suggestion`, `unknown_set_key_is_rejected_with_a_suggestion_and_the_assignment` |

@@ -137,7 +137,7 @@ into the issue that owns it. Highest-risk behaviors and where they are tested:
 |---|---|---|
 | Band mapping / onset math wrong | Unit (synthetic signals) | M2 issues: `sine_at_60hz_lights_up_bass_band_only`, `click_train_produces_onsets_at_expected_frames` |
 | wgpu readback row padding (256 B) | Integration | M1 renderer issue: `readback_handles_non_multiple_of_256_row_widths` |
-| Audio re-encoded instead of copied | Integration (ffprobe) | M1 encoder issue: `muxed_audio_stream_is_copied_not_reencoded` |
+| Audio re-encoded instead of copied | Integration (bitstream compare; an ffprobe codec assert cannot see an mp3 → mp3 re-encode) | M1 encoder issue: `muxed_audio_stream_is_copied_not_reencoded` |
 | Half-written output on failure | Integration | M1 encoder issue: `ffmpeg_death_midrender_leaves_no_output_file` |
 | Nondeterminism / shader drift | Golden frames, software adapter | M2 golden-harness issue |
 | Config precedence and strict keys | Unit | M0 config issue: `set_override_beats_config_file_value` |
@@ -181,7 +181,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
   *(prerequisite: Step 5)*
 - [x] **Step 7** - wgpu offscreen renderer: adapter selection, readback with row
   padding *(prerequisite: Step 1)*
-- [ ] **Step 8** - ffmpeg encoder subprocess: rawvideo stdin, `-c:a copy`, `.part`
+- [x] **Step 8** - ffmpeg encoder subprocess: rawvideo stdin, `-c:a copy`, `.part`
   rename, stderr monitoring *(prerequisite: Step 3)*
 - [ ] **Step 9** - Pipeline orchestration: progress callback trait, hardcoded RMS
   test shader, `--sample` *(prerequisite: Steps 6, 7, 8)*
