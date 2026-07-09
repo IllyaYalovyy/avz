@@ -32,6 +32,7 @@ fn settings() -> EncodeSettings {
         fps: FPS,
         codec: Codec::X264,
         quality: 30,
+        audio_start: Duration::ZERO,
     }
 }
 

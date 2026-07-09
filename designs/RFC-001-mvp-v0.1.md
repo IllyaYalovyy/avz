@@ -127,6 +127,18 @@ specific to this RFC:
 - **Fixtures**: a tiny CC0-licensed mp3 (~5 s) plus generated synthetic signals
   (sines, clicks, silence) created in test code — never committed wav/mp3s for
   DSP tests.
+- **Where the `--sample` reduced resolution lives** (decided in Step 9). VISION
+  §3 wants sample renders to default to a reduced resolution, and §5.5 fixes the
+  precedence chain. Rather than special-casing the flag in the renderer, `--sample`
+  contributes a config layer of its own, ranked above preset defaults and below
+  the `--config` file. It is therefore a default like any other: `--config` and
+  `--set` still win, so previewing at the final resolution stays possible. No
+  existing layer moves relative to another.
+- **Where the `--sample` audio offset lives** (decided in Step 9). The picture
+  starts at a frame boundary, so the audio must start at that same instant —
+  `start_frame / fps`, not the seconds the user typed, which may fall between two
+  frames. It reaches ffmpeg as an `-ss` in front of the mp3 input, which seeks
+  and still copies: `-c:a copy` is never traded away for a sampled render.
 
 ## Testing Strategy
 
@@ -183,7 +195,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
   padding *(prerequisite: Step 1)*
 - [x] **Step 8** - ffmpeg encoder subprocess: rawvideo stdin, `-c:a copy`, `.part`
   rename, stderr monitoring *(prerequisite: Step 3)*
-- [ ] **Step 9** - Pipeline orchestration: progress callback trait, hardcoded RMS
+- [x] **Step 9** - Pipeline orchestration: progress callback trait, hardcoded RMS
   test shader, `--sample` *(prerequisite: Steps 6, 7, 8)*
 - [ ] **Step 10** - CI integration test: 2 s software render, ffprobe asserts
   *(prerequisite: Step 9)*

@@ -37,10 +37,16 @@ fi
 
 # 2. No UI-layer dependencies. --edges normal ignores dev-dependencies, which
 #    are free to pull in whatever a test needs.
+#
+#    The crate names are collected before they are searched, never piped into
+#    `grep -q`: a matching `grep -q` exits at once, awk dies of SIGPIPE, and
+#    `set -o pipefail` then reports the pipeline as failed — so the `if` below
+#    would read a *found* banned crate as "not found".
 tree=$(cargo tree --quiet --package avz-core --edges normal --prefix none)
+crates=$(awk '{print $1}' <<<"${tree}")
 
 for banned in clap anyhow indicatif; do
-    if awk '{print $1}' <<<"${tree}" | grep -qx "${banned}"; then
+    if grep -qx "${banned}" <<<"${crates}"; then
         echo "error: avz-core must not depend on '${banned}' (AGENTS.md, core/cli split)." >&2
         echo "hint: keep '${banned}' in avz-cli; core uses typed thiserror errors." >&2
         status=1

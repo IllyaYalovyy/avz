@@ -9,6 +9,7 @@
 mod cli;
 mod exit;
 mod probe;
+mod render;
 
 use std::process::ExitCode;
 
@@ -68,14 +69,14 @@ fn init_tracing(verbose: bool, quiet: bool) {
 fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
         Command::Render(args) => {
-            tracing::debug!(input = ?args.input, out = ?args.out, "render requested");
-
-            // Before analysis, before the GPU, before a single frame: a render
-            // that cannot be encoded should fail in the first second, not the
-            // last one (VISION.md §5.4). Step 8 hands the verified binary to the
-            // encoder; for now the check itself is the value.
-            avz_core::encode::preflight(avz_core::encode::DEFAULT_PROGRAM)?;
-            not_implemented(cli)
+            tracing::debug!(
+                input = ?args.input,
+                out = ?args.out,
+                sample = ?args.sample,
+                adapter = %args.adapter,
+                "render requested"
+            );
+            render::run(args, cli.quiet)
         }
         Command::Probe(args) => {
             tracing::debug!(input = ?args.input, "probe requested");

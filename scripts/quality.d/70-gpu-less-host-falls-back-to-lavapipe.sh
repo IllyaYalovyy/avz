@@ -8,9 +8,11 @@
 # Restricting Vulkan to the lavapipe ICD simulates the GPU-less host, which is
 # what `docs/TESTING.md` otherwise marks as "manual: needs a GPU-less host".
 #
-# The assertions live in the render tests. AVZ_TEST_EXPECT_NO_GPU turns the ones
-# that tolerate either adapter into ones that demand the fallback, so this hook
-# fails if the ICD restriction ever stops taking effect.
+# The assertions live in the render and pipeline tests. AVZ_TEST_EXPECT_NO_GPU
+# turns the ones that tolerate either adapter into ones that demand the fallback,
+# so this hook fails if the ICD restriction ever stops taking effect. It is also
+# what proves the CLI has a warning to print: `avz render` on a GPU-less host
+# must say so once, and say how to silence it.
 
 set -euo pipefail
 
@@ -40,6 +42,7 @@ echo "Simulating a GPU-less host with ${icd}"
 AVZ_TEST_EXPECT_NO_GPU=1 \
     VK_DRIVER_FILES="${icd}" \
     VK_ICD_FILENAMES="${icd}" \
-    cargo test --quiet --package avz-core --test offscreen_readback
+    cargo test --quiet --package avz-core \
+    --test offscreen_readback --test pipeline_render
 
-echo "GPU-less host: auto falls back to lavapipe and flags it; gpu fails fast."
+echo "GPU-less host: auto falls back to lavapipe, warns once, and gpu fails fast."
