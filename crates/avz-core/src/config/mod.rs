@@ -4,6 +4,12 @@
 //! defaults > built-in defaults. Unknown keys are rejected with "did you mean"
 //! suggestions rather than silently ignored (`VISION.md` §5.5).
 //!
+//! One layer sits inside that chain without appearing in it: the defaults
+//! `--sample` implies ([`ConfigLayer::for_sample`]). They rank above preset
+//! defaults and below the config file, so the reduced sample resolution
+//! `VISION.md` §3 asks for is a default like any other — overridable, and never
+//! able to displace something the user actually wrote.
+//!
 //! Two types carry the weight. [`ConfigLayer`] is one source of settings, with
 //! every field optional — that is what makes "this layer has no opinion about
 //! `fps`" expressible. [`Config`] is the fully-resolved, validated result the
@@ -228,6 +234,8 @@ pub struct TextLayer {
 pub struct Sources {
     /// Defaults declared by the selected preset's schema (RFC-001 Step 15).
     pub preset_defaults: ConfigLayer,
+    /// Defaults implied by `--sample`. See [`ConfigLayer::for_sample`].
+    pub sample_defaults: ConfigLayer,
     /// The `--config` file.
     pub file: ConfigLayer,
     /// `--set key.path=value` overrides.
@@ -241,11 +249,13 @@ impl Sources {
     pub fn resolve(self) -> Result<Config> {
         let Sources {
             mut preset_defaults,
+            sample_defaults,
             file,
             set,
             cli,
         } = self;
 
+        preset_defaults.overlay(sample_defaults);
         preset_defaults.overlay(file);
         preset_defaults.overlay(set);
         preset_defaults.overlay(cli);
@@ -278,6 +288,26 @@ impl ConfigLayer {
             Error::Config(message) => Error::Config(format!("{}:\n{message}", path.display())),
             other => other,
         })
+    }
+
+    /// The settings `--sample` implies, and nothing else.
+    ///
+    /// A sample render exists so the user can look at a chorus in seconds rather
+    /// than minutes (`VISION.md` §3), so it drops to [`SAMPLE_RESOLUTION`]. It
+    /// sits below the config file in the precedence chain, so anyone who wants
+    /// to preview the final resolution can still ask for it.
+    pub fn for_sample() -> Self {
+        Self {
+            output: OutputLayer {
+                resolution: Some(
+                    SAMPLE_RESOLUTION
+                        .parse()
+                        .expect("the built-in sample resolution parses"),
+                ),
+                ..OutputLayer::default()
+            },
+            ..Self::default()
+        }
     }
 
     /// Parse `--set key.path=value` assignments, later ones winning.
@@ -432,6 +462,12 @@ impl ConfigLayer {
         Ok(config)
     }
 }
+
+/// The resolution a `--sample` render falls back to.
+///
+/// Reduced, not tiny: 720p is a quarter of the pixels of 1080p and still shows
+/// what a preset is doing.
+pub const SAMPLE_RESOLUTION: &str = "720p";
 
 /// The highest frame rate worth encoding; anything above is a typo.
 const MAX_FPS: u32 = 240;

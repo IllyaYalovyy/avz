@@ -20,6 +20,7 @@ use std::io::{self, BufRead as _, BufReader, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, Command, ExitStatus, Stdio};
 use std::thread::JoinHandle;
+use std::time::Duration;
 
 use crate::config::Codec;
 use crate::encode::Ffmpeg;
@@ -53,6 +54,13 @@ pub struct EncodeSettings {
     pub codec: Codec,
     /// CRF quality; lower is better.
     pub quality: u8,
+    /// How far into the mp3 the muxed audio starts, for a `--sample` render.
+    ///
+    /// [`Duration::ZERO`] for a whole-song render. ffmpeg seeks the input and
+    /// still copies the stream, so a sampled render costs no re-encode — but it
+    /// starts at the mp3 frame nearest the offset, not at the exact sample,
+    /// because a copied stream cannot be cut mid-frame.
+    pub audio_start: Duration,
 }
 
 impl EncodeSettings {
@@ -135,6 +143,12 @@ fn ffmpeg_args(settings: &EncodeSettings, audio: &Path, part: &Path) -> Result<V
     .map(OsString::from)
     .collect();
 
+    // An input option, so it must precede the mp3 and follow `pipe:0`: seeking
+    // the rawvideo input would throw away frames avz already rendered.
+    if !settings.audio_start.is_zero() {
+        args.push("-ss".into());
+        args.push(format!("{:.6}", settings.audio_start.as_secs_f64()).into());
+    }
     args.push("-i".into());
     args.push(audio.into());
 
@@ -460,6 +474,7 @@ mod tests {
             fps: 30,
             codec: Codec::X264,
             quality: 18,
+            audio_start: Duration::ZERO,
         }
     }
 
@@ -624,6 +639,55 @@ mod tests {
                 .expect_err("a video with no pixels or no frames is not a video");
             assert!(matches!(err, Error::Encode(_)), "got {err:?}");
         }
+    }
+
+    /// `--sample 0:45..1:45` renders the frames of that minute, so the mp3 must
+    /// be muxed from the same instant. `-ss` is an *input* option: it has to sit
+    /// in front of the audio input, never in front of the rawvideo one, which
+    /// always starts at its first frame.
+    #[test]
+    fn a_sampled_render_seeks_the_audio_input_and_still_copies_the_stream() {
+        let argv = args(&EncodeSettings {
+            audio_start: Duration::from_secs(45),
+            ..settings()
+        });
+
+        assert!(
+            contains_run(&argv, &["-ss", "45.000000", "-i", "song.mp3"]),
+            "the seek must apply to the mp3 input: {argv:?}"
+        );
+        assert!(contains_run(&argv, &["-c:a", "copy"]), "{argv:?}");
+
+        let video_input = argv.iter().position(|arg| arg == "pipe:0").expect("stdin");
+        let seek = argv.iter().position(|arg| arg == "-ss").expect("the seek");
+        assert!(
+            seek > video_input,
+            "seeking the rawvideo input would drop rendered frames: {argv:?}"
+        );
+    }
+
+    /// A sub-second sample start survives the argv: `-ss 1` would silently move
+    /// the audio a whole second away from the picture.
+    #[test]
+    fn a_fractional_audio_start_keeps_its_precision() {
+        let argv = args(&EncodeSettings {
+            audio_start: Duration::from_secs_f64(31.0 / 30.0),
+            ..settings()
+        });
+
+        assert!(contains_run(&argv, &["-ss", "1.033333"]), "{argv:?}");
+    }
+
+    /// A whole-song render must not seek at all: `-ss 0` on an mp3 is not free,
+    /// and an argv that always seeks cannot be read as "this render did not".
+    #[test]
+    fn a_whole_song_render_does_not_seek_the_audio() {
+        let argv = args(&settings());
+
+        assert!(
+            !argv.iter().any(|arg| arg == "-ss"),
+            "nothing to seek past: {argv:?}"
+        );
     }
 
     #[test]

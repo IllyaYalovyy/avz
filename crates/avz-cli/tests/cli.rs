@@ -63,16 +63,18 @@ fn render_without_args_exits_2() {
     avz().arg("render").assert().code(2);
 }
 
+/// A missing song is an input problem (exit 3), reached only once ffmpeg has
+/// been found.
 #[test]
-fn render_stub_exits_4_with_polite_message() {
+fn render_of_a_missing_file_exits_3() {
     let path = path_with_fake_ffmpeg();
 
     avz()
         .env("PATH", path.path())
-        .args(["render", "x.mp3"])
+        .args(["render", "no-such-song.mp3"])
         .assert()
-        .code(4)
-        .stderr(contains("not implemented"));
+        .code(3)
+        .stderr(contains("no such file"));
 }
 
 #[test]
@@ -88,9 +90,9 @@ fn render_without_ffmpeg_fails_with_the_fedora_install_hint() {
         .stderr(contains("sudo dnf install ffmpeg"));
 }
 
-/// The preflight exists to fail *early*. If it ever ran after analysis or
-/// rendering, this is the assertion that would notice: the stub render never
-/// gets to say "not implemented".
+/// The preflight exists to fail *early*. If it ever ran after the input was
+/// opened, this is the assertion that would notice: `x.mp3` does not exist, and
+/// avz must complain about ffmpeg rather than about the file.
 #[test]
 fn render_checks_for_ffmpeg_before_doing_any_work() {
     let path = path_without_ffmpeg();
@@ -100,7 +102,113 @@ fn render_checks_for_ffmpeg_before_doing_any_work() {
         .args(["render", "x.mp3"])
         .assert()
         .code(4)
-        .stderr(contains("not implemented").not());
+        .stderr(contains("no such file").not());
+}
+
+/// A backwards `--sample` never reaches the decoder: exit 2, bad arguments.
+#[test]
+fn render_with_a_backwards_sample_range_exits_2() {
+    avz()
+        .args(["render", "song.mp3", "--sample", "3s..1s"])
+        .assert()
+        .code(2)
+        .stderr(contains("the end must come after the start"));
+}
+
+/// The song is five seconds long, so there is nothing at six. That is the user's
+/// argument, not a render failure: exit 2.
+#[test]
+fn render_of_a_sample_past_the_end_of_the_song_exits_2() {
+    avz()
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .args(["--sample", "6s..8s"])
+        .assert()
+        .code(2)
+        .stderr(contains("the song is only 5"));
+}
+
+/// The encoder renames its part file over the output path, so an `--out` aimed
+/// at the input would destroy the song.
+#[test]
+fn render_refuses_to_write_over_its_own_input() {
+    avz()
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--out")
+        .arg(fixture("tone-tagged.mp3"))
+        .assert()
+        .code(2)
+        .stderr(contains("the song avz is reading"));
+}
+
+/// UT-001 and UT-002 at the CLI: a sampled render of a real mp3 produces a
+/// playable mp4 next to the input, with both streams and the sampled duration.
+///
+/// Software adapter, because a golden-ish assertion must not depend on the
+/// developer's GPU. Needs the system ffmpeg and Mesa lavapipe.
+#[test]
+fn render_writes_a_sampled_mp4_next_to_the_input() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    avz()
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "200ms", "--adapter", "software"])
+        .assert()
+        .success()
+        .stdout(contains("song.mp4"))
+        .stdout(contains("6 frames"))
+        .stdout(contains("software rendering"));
+
+    let output = dir.path().join("song.mp4");
+    assert!(output.is_file(), "the render produced no mp4");
+    assert!(
+        !dir.path().join("song.mp4.part").exists(),
+        "the part file is renamed, not left behind"
+    );
+
+    // `--sample` defaults to a reduced resolution (VISION.md §3).
+    assert_eq!(probe(&output, "v", "width,height"), "1280,720");
+    assert_eq!(probe(&output, "a", "codec_name"), "mp3");
+}
+
+/// `--quiet` suppresses everything but errors (`VISION.md` §3).
+#[test]
+fn a_quiet_render_prints_nothing_on_success() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    avz()
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "100ms", "--adapter", "software", "--quiet"])
+        .assert()
+        .success()
+        .stdout("");
+
+    assert!(dir.path().join("song.mp4").is_file());
+}
+
+/// Ask `ffprobe` for one entry of every `kind` (`v` or `a`) stream.
+fn probe(file: &Path, kind: &str, entries: &str) -> String {
+    let output = std::process::Command::new("ffprobe")
+        .args(["-v", "error", "-select_streams", kind])
+        .args(["-show_entries", &format!("stream={entries}")])
+        .args(["-of", "csv=p=0"])
+        .arg(file)
+        .output()
+        .expect("the render tests need ffprobe: `sudo dnf install ffmpeg`");
+
+    assert!(
+        output.status.success(),
+        "ffprobe failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
 
 /// `probe` reads tags; it never encodes. Gating it on ffmpeg would be a lie.

@@ -79,6 +79,42 @@ fn preset_defaults_beat_builtin_defaults() {
     assert_close(sources.resolve().expect("resolves").visual.smoothing, 0.8);
 }
 
+/// `--sample` exists for fast iteration, so it trades pixels for turnaround
+/// (`VISION.md` §3). Nothing else in the chain has to opt in.
+#[test]
+fn a_sample_render_defaults_to_a_reduced_resolution() {
+    let sources = Sources {
+        sample_defaults: ConfigLayer::for_sample(),
+        ..Sources::default()
+    };
+
+    let config = sources.resolve().expect("resolves");
+    assert_eq!(config.output.resolution.to_string(), "1280x720");
+    assert_eq!(config.output.fps, 30, "only the resolution is reduced");
+}
+
+/// A default, not a decree: someone sampling to check the final look must be
+/// able to ask for the final resolution.
+#[test]
+fn an_explicit_resolution_beats_the_sample_default() {
+    let sources = Sources {
+        sample_defaults: ConfigLayer::for_sample(),
+        file: layer("[output]\nresolution = \"1080p\"\n"),
+        ..Sources::default()
+    };
+
+    let config = sources.resolve().expect("resolves");
+    assert_eq!(config.output.resolution.to_string(), "1920x1080");
+}
+
+/// The sample default is opt-in: a whole-song render must stay at 1080p.
+#[test]
+fn a_whole_song_render_keeps_the_builtin_resolution() {
+    let config = Sources::default().resolve().expect("resolves");
+
+    assert_eq!(config.output.resolution.to_string(), "1920x1080");
+}
+
 #[test]
 fn a_silent_layer_does_not_erase_a_lower_one() {
     let sources = Sources {

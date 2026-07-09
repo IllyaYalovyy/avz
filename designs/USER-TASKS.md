@@ -30,7 +30,12 @@ required.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:** Partial. The pipeline runs end to end and muxes the
+original audio: `render_writes_a_sampled_mp4_next_to_the_input`,
+`a_render_without_a_sample_covers_every_frame_of_the_song`,
+`muxed_audio_stream_is_copied_not_reencoded`. The visuals are still the M1
+tracer bullet, not a preset (`the_rendered_brightness_visibly_follows_the_loudness_of_the_song`),
+and there is no progress bar yet — both land with RFC-001 Steps 14 and 21.
 
 ## UT-002: Iterate quickly on an excerpt
 
@@ -48,7 +53,17 @@ default, in a fraction of the time. Audio in the output covers the same range.
 
 **Interactions:** 1 per iteration
 
-**Regression coverage:** TODO
+**Regression coverage:** Frame selection:
+`a_sampled_render_writes_exactly_the_frames_of_the_requested_range`,
+`a_sample_range_selects_the_frames_that_cover_it`,
+`a_sample_boundary_lands_on_the_frame_whose_timestamp_it_names`. The audio
+covering the same range:
+`a_sampled_render_muxes_the_matching_slice_of_the_original_audio`,
+`the_audio_starts_at_the_first_rendered_frames_timestamp`. The reduced default
+resolution: `a_sample_render_defaults_to_a_reduced_resolution`,
+`render_writes_a_sampled_mp4_next_to_the_input`. Both `--sample` spellings:
+`sample_accepts_a_bare_duration_and_a_clock_range`. `--preset` is not a flag
+yet (RFC-001 Step 15).
 
 ## UT-003: Render on a machine with no GPU
 
@@ -72,7 +87,9 @@ lavapipe. `--adapter gpu` instead fails fast with a clear error.
 `only_an_auto_render_that_lands_on_software_is_worth_warning_about`.
 `scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh` simulates the
 GPU-less host by restricting Vulkan to the lavapipe ICD, so this no longer needs
-one. The warning text itself lands with the CLI render command (RFC-001 Step 21).
+one. The warning itself, once per render and only under `--adapter auto`:
+`a_gpu_less_auto_render_warns_once_and_says_how_to_silence_it`,
+`an_explicit_software_render_warns_about_nothing`.
 
 ## UT-004: Discover presets and their parameters
 

@@ -69,6 +69,23 @@ output appears only after a clean exit, that a mid-render death removes the
 `.part` file, and that a dropped `Encoder` kills ffmpeg and cleans up. The mux
 test in the same file drives the real system ffmpeg.
 
+**The whole pipeline.** `crates/avz-core/tests/pipeline_render.rs` renders the
+fixture on lavapipe through the same stand-in, which turns the "mp4" into the raw
+RGBA avz actually piped. That is the only vantage point from which *which* frames
+were rendered and *how bright* each one was are both observable, so it is where
+`--sample` frame selection and the tracer bullet's brightness-follows-loudness
+mapping are pinned. Expected brightness is derived from the sRGB transfer
+function written out in the test, not read back from the renderer — an
+independent implementation is the point, and two bytes of slack covers lavapipe's
+rounding.
+
+**`--sample` audio.** The picture starts at a frame boundary, so the audio must
+too. `EncodeSettings::audio_start` becomes an ffmpeg `-ss` in front of the mp3
+input, which seeks *and still copies*. `a_sampled_render_muxes_the_matching_slice_of_the_original_audio`
+proves it by finding the muxed bitstream verbatim inside the original at a
+non-zero offset: a re-encode would not appear at all, and a missing seek would
+appear at offset zero.
+
 **Manual listening pass.** The M2 reference-track ritual: render 3–4 reference
 tracks (something quiet, something dense, a Cold Design track, a Carpathians
 track) and confirm onsets read as on-beat rather than late. Repeat before each
@@ -106,7 +123,14 @@ exists, or `TODO` / `manual` with a reason.
 | Software fallback happens without a warning, or warns when asked for | The user cannot tell a slow render from a broken one, or is nagged every render | Unit + integration + quality hook | `only_an_auto_render_that_lands_on_software_is_worth_warning_about`, `auto_always_finds_an_adapter_and_flags_a_software_fallback`, `a_gpu_less_host_falls_back_to_software_and_says_so`, `scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh` |
 | A second render backend creeps in (dx12/metal/gles) | Shaders run on an untested path; golden frames stop meaning anything | Quality hook | `scripts/quality.d/60-render-is-vulkan-only.sh` |
 | Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | TODO |
-| Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames | TODO |
+| Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames + quality hook | `scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh`; golden frames TODO |
+| Rendering starts before analysis has finished | No lookahead, no global normalization — the two-pass design silently becomes one pass | Integration | `progress_reports_the_three_phases_in_order_with_a_frame_total` |
+| Visuals do not react to the audio at all | The one thing avz exists for, and a static video still looks like a successful render | Integration (pixels) | `the_rendered_brightness_visibly_follows_the_loudness_of_the_song` |
+| `--sample` renders the wrong frames | The picture runs against the wrong second of the song, for the whole excerpt | Unit + integration | `a_sample_range_selects_the_frames_that_cover_it`, `a_sample_boundary_lands_on_the_frame_whose_timestamp_it_names`, `a_sampled_render_writes_exactly_the_frames_of_the_requested_range` |
+| `--sample` picture and muxed audio start at different instants | Sound sits a fraction of a second off the visuals for the whole excerpt | Unit + integration (bitstream compare) | `the_audio_starts_at_the_first_rendered_frames_timestamp`, `a_sampled_render_seeks_the_audio_input_and_still_copies_the_stream`, `a_sampled_render_muxes_the_matching_slice_of_the_original_audio` |
+| A sample the song cannot satisfy reaches ffmpeg as an empty video | A cryptic encoder failure, or a zero-frame mp4 | Unit + integration | `a_sample_that_starts_after_the_song_ends_is_a_config_error`, `a_sample_shorter_than_one_frame_is_a_config_error`, `render_of_a_sample_past_the_end_of_the_song_exits_2` |
+| `--sample` renders at full resolution | "Fast iteration" costs as much as a full render | Unit + integration | `a_sample_render_defaults_to_a_reduced_resolution`, `an_explicit_resolution_beats_the_sample_default`, `render_writes_a_sampled_mp4_next_to_the_input` |
+| `--out` points back at the input | The song is destroyed by its own render, after ffmpeg has read it | Unit + integration | `an_output_that_is_the_input_is_refused_however_it_is_spelled`, `render_refuses_to_write_over_its_own_input` |
 | ffmpeg missing at runtime | Tool fails late with a cryptic error | Integration (preflight) | `missing_ffmpeg_fails_with_the_fedora_install_hint`, `render_without_ffmpeg_fails_with_the_fedora_install_hint`, `render_checks_for_ffmpeg_before_doing_any_work` |
 | `ffmpeg` on PATH is not really ffmpeg | Cryptic subprocess failure mid-render | Integration (preflight) | `a_binary_that_is_not_ffmpeg_is_rejected`, `an_ffmpeg_that_exits_nonzero_is_rejected` |
 | ffmpeg dies mid-render, or the finished file cannot be moved into place | Half-written `.mp4` left on disk | Integration | `ffmpeg_death_midrender_leaves_no_output_file`, `a_dropped_encoder_kills_ffmpeg_and_removes_the_part_file`, `a_render_that_cannot_be_moved_into_place_leaves_no_part_file`, `the_output_appears_only_after_a_successful_finish` |

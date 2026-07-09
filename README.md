@@ -17,8 +17,13 @@ See [VISION.md](VISION.md) for the full design: architecture, module breakdown,
 preset system, milestones, and backlog. VISION.md is the north star; a feature
 request that does not serve it goes to the backlog.
 
-**Status:** M0 in progress. The workspace is scaffolded and the CLI surface
-exists; every subcommand still exits with "not implemented yet".
+**Status:** M1 landed. `avz render song.mp3` runs the whole pipeline — decode,
+RMS analysis, offscreen wgpu render, ffmpeg encode with the original audio muxed
+untouched — and `avz probe` reports tags. The visuals are still the tracer
+bullet: a fullscreen grey whose brightness follows loudness. Real presets,
+palettes, text, and background layers arrive in M2–M4, so `--preset`,
+`--palette`, `--config`, `--set`, and `--bg` below are not flags yet, and
+`avz presets` and `avz config` still exit with "not implemented yet".
 
 ## Requirements
 
@@ -54,6 +59,9 @@ avz render song.mp3 --preset nebula --palette ember \
 # Fast iteration on a chorus, low-res
 avz render song.mp3 --preset ribbons --sample 0:45..1:45
 
+# Pick the adapter: auto (default), gpu (fail without one), software (lavapipe)
+avz render song.mp3 --adapter software
+
 # Full control via config file (reproducible; check into the album repo)
 avz render song.mp3 --config cold-design.toml
 
@@ -70,7 +78,9 @@ for f in album/*.mp3; do avz render "$f" --config album.toml; done
 ```
 
 Configuration precedence: CLI flags > `--set` overrides > `--config` file >
-preset defaults > built-in defaults.
+preset defaults > built-in defaults. `--sample` contributes one default of its
+own — a reduced 720p resolution — which ranks just above preset defaults, so a
+config file or a flag still wins.
 
 ## Project Workflow
 
