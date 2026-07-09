@@ -70,7 +70,8 @@ exists, or `TODO` / `manual` with a reason.
 | wgpu readback row padding mishandled (256-byte alignment) | Skewed or garbage frames | Integration | TODO |
 | Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | TODO |
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames | TODO |
-| ffmpeg missing at runtime | Tool fails late with a cryptic error | Integration (preflight) | TODO |
+| ffmpeg missing at runtime | Tool fails late with a cryptic error | Integration (preflight) | `missing_ffmpeg_fails_with_the_fedora_install_hint`, `render_without_ffmpeg_fails_with_the_fedora_install_hint`, `render_checks_for_ffmpeg_before_doing_any_work` |
+| `ffmpeg` on PATH is not really ffmpeg | Cryptic subprocess failure mid-render | Integration (preflight) | `a_binary_that_is_not_ffmpeg_is_rejected`, `an_ffmpeg_that_exits_nonzero_is_rejected` |
 | ffmpeg dies mid-render | Half-written `.mp4` left on disk | Integration | TODO |
 | Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (ffprobe codec assert) | TODO |
 | Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |

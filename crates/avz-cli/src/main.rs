@@ -68,6 +68,12 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
     match &cli.command {
         Command::Render(args) => {
             tracing::debug!(input = ?args.input, out = ?args.out, "render requested");
+
+            // Before analysis, before the GPU, before a single frame: a render
+            // that cannot be encoded should fail in the first second, not the
+            // last one (VISION.md §5.4). Step 8 hands the verified binary to the
+            // encoder; for now the check itself is the value.
+            avz_core::encode::preflight(avz_core::encode::DEFAULT_PROGRAM)?;
         }
         Command::Probe(args) => tracing::debug!(input = ?args.input, "probe requested"),
         Command::Presets(args) => tracing::debug!(name = ?args.name, "presets requested"),

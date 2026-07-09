@@ -97,6 +97,7 @@ dependencies = [
  "avz-core",
  "clap",
  "predicates",
+ "tempfile",
  "tracing",
  "tracing-subscriber",
 ]
