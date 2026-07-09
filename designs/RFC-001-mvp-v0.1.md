@@ -166,7 +166,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 **M0 — Skeleton & plumbing** *(accept: `avz probe song.mp3` works; `avz render` fails politely)*
 
-- [ ] **Step 1** - Cargo workspace scaffold: `avz-core` + `avz-cli`, clap CLI with
+- [x] **Step 1** - Cargo workspace scaffold: `avz-core` + `avz-cli`, clap CLI with
   stubbed subcommands, exit codes, tracing, CI green *(prerequisite: -)*
 - [ ] **Step 2** - Config module: TOML schema, strict unknown-key rejection with
   suggestions, precedence merging *(prerequisite: Step 1)*

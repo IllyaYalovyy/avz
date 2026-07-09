@@ -17,7 +17,8 @@ See [VISION.md](VISION.md) for the full design: architecture, module breakdown,
 preset system, milestones, and backlog. VISION.md is the north star; a feature
 request that does not serve it goes to the backlog.
 
-**Status:** pre-M0. The workspace is not scaffolded yet.
+**Status:** M0 in progress. The workspace is scaffolded and the CLI surface
+exists; every subcommand still exits with "not implemented yet".
 
 ## Requirements
 
@@ -97,6 +98,11 @@ task-runner files, prompts, context files, and chat logs from being committed:
 ├── VISION.md                    # Product and architecture north star
 ├── AGENTS.md                    # Instructions for AI coding agents
 ├── CONTRIBUTING.md              # Contributor rules and quality bar
+├── Cargo.toml                   # Cargo workspace
+├── crates/
+│   ├── avz-core/                # library: analysis / meta / render / encode /
+│   │                            #          config / pipeline
+│   └── avz-cli/                 # thin binary `avz`: clap → avz-core calls
 ├── designs/
 │   ├── RFC-000-template.md      # Design proposal template
 │   └── USER-TASKS.md            # User workflow inventory
@@ -111,22 +117,19 @@ task-runner files, prompts, context files, and chat logs from being committed:
 │   └── prompts/                 # Copy-ready AI prompts for common workflows
 ├── scripts/
 │   ├── install-git-hooks.sh     # Local AI-file pre-commit guard
-│   └── quality.sh               # Local quality gate
+│   ├── quality.sh               # Local quality gate
+│   └── quality.d/               # Project-specific quality checks
 └── .github/workflows/quality.yml
 ```
 
-The planned crate layout (VISION.md §4.1) lands with M0:
-
-```text
-crates/
-├── avz-core/    # library: analysis / meta / render / encode / config / pipeline
-│   └── presets/ # WGSL + schema JSON, embedded via include_str!
-└── avz-cli/     # thin binary: clap parsing → avz-core calls
-```
+Still to land (VISION.md §4.1): `crates/avz-core/presets/`, holding the WGSL
+shaders and schema JSON embedded via `include_str!`.
 
 `avz-core` has zero terminal I/O and reports progress through a callback trait.
 That core/cli split is the "a GUI could be added later without refactoring"
-guarantee — keep it intact.
+guarantee — keep it intact. `scripts/quality.d/10-core-is-ui-agnostic.sh`
+enforces it: no printing from core, no `clap` / `anyhow` / `indicatif` in its
+dependency tree.
 
 ## Quality Gate
 
