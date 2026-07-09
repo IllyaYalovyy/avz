@@ -6,6 +6,8 @@
 //!
 //! Populated by RFC-001 Steps 3 and 8.
 
+mod encoder;
 mod preflight;
 
+pub use encoder::{EncodeSettings, Encoder};
 pub use preflight::{DEFAULT_PROGRAM, Ffmpeg, preflight};
