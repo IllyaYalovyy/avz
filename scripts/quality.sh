@@ -115,10 +115,13 @@ run_project_hooks() {
     fi
 
     local hook
+    # -u+x, not -111: hooks run as their owner, and a restrictive umask (0027)
+    # clears the other-execute bit that -111 demands. Matching on -111 made the
+    # gate skip every hook without saying so.
     while IFS= read -r hook; do
         log "Project quality hook: ${hook}"
         "${hook}"
-    done < <(find scripts/quality.d -maxdepth 1 -type f -perm -111 | sort)
+    done < <(find scripts/quality.d -maxdepth 1 -type f -perm -u+x | sort)
 }
 
 run_shell_syntax_checks
