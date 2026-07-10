@@ -52,4 +52,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("ink.wgsl"),
         schema: include_str!("ink.json"),
     },
+    Preset {
+        name: "bars",
+        description: "a spectrum analyzer in one corner: anchored bars over whatever is behind them",
+        source: include_str!("bars.wgsl"),
+        schema: include_str!("bars.json"),
+    },
 ];

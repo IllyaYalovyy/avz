@@ -12,6 +12,16 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`bars`, the first panel preset** (#31). A spectrum analyzer that lives in
+  one anchored rectangle — `anchor` speaks the text card's nine-grid
+  vocabulary, `width`/`height`/`margin` size the panel — and leaves every
+  pixel outside it fully transparent, so a `background.image` or
+  `background.video` shows through untouched. Bars divide the same 512-bucket
+  spectrum `ribbons` reads, bass at the left; a `glow` halo rises from each
+  tip and dies inside the panel. First shipped consumer of the schema's
+  `enum` parameter kind. `a_panel_preset_lights_only_its_panel` holds every
+  panel preset to "exactly the backdrop outside the rectangle."
+
 - **The codec matrix.** `--codec x265` and `--codec av1` encode, alongside the
   `x264` that already did. `--quality` stays one number and reaches all three as
   `-crf`, `-pix_fmt yuv420p` still holds across the matrix, and the audio is

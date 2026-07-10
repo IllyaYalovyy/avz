@@ -1,0 +1,87 @@
+{
+  "needs_spectrum": true,
+  "perf_hint": "the panel is a fraction of the frame and each pixel reads the spectrum four times, so `bars` is among the cheapest presets at any `bar_count` — on software rendering the resolution is what costs, and `--sample` previews at 720p for exactly that reason",
+  "params": [
+    {
+      "name": "anchor",
+      "type": "enum",
+      "default": "bottom-left",
+      "variants": [
+        "top-left",
+        "top-center",
+        "top-right",
+        "center-left",
+        "center",
+        "center-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+      ],
+      "slot": [0, 0],
+      "description": "Which of the nine grid positions the panel sits in, the text card's vocabulary."
+    },
+    {
+      "name": "width",
+      "type": "float",
+      "default": 0.38,
+      "min": 0.05,
+      "max": 1.0,
+      "slot": [0, 1],
+      "description": "The panel's width, as a fraction of the frame's width."
+    },
+    {
+      "name": "height",
+      "type": "float",
+      "default": 0.24,
+      "min": 0.05,
+      "max": 1.0,
+      "slot": [0, 2],
+      "description": "The panel's height, as a fraction of the frame's height."
+    },
+    {
+      "name": "margin",
+      "type": "float",
+      "default": 0.04,
+      "min": 0.0,
+      "max": 0.4,
+      "slot": [0, 3],
+      "description": "The gap between the panel and the frame's edges, as a fraction of the short edge."
+    },
+    {
+      "name": "bar_count",
+      "type": "int",
+      "default": 32,
+      "min": 4,
+      "max": 96,
+      "slot": [1, 0],
+      "description": "How many bars divide the spectrum, bass at the left edge and air at the right."
+    },
+    {
+      "name": "gap",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 0.9,
+      "slot": [1, 1],
+      "description": "How much of each bar's pitch is empty space between neighbours."
+    },
+    {
+      "name": "glow",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [1, 2],
+      "description": "How brightly a bar's tip halos upward into the unlit part of its column."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [1, 3],
+      "description": "How much light the panel puts out overall."
+    }
+  ]
+}

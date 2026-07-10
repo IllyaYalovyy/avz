@@ -1,0 +1,6 @@
+# Golden frame hashes for the `bars` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 7ad2d9d2d37981b3e1176b597e54e1f3e2f816aef896428c6101a4936cc584cb
+10 40c9fc488aba8d11ed900f2f8d6b34d4158d635a4684a056d481e7d73b1bbbce
+100 0ed08fb4b3c8d3a45eef60360bbcd99e7cdb79769e7bbe0fcfa4cb5434554181
