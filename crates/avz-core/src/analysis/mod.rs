@@ -9,6 +9,8 @@
 
 pub mod decode;
 pub mod features;
+pub mod spectrum;
 
 pub use decode::{DecodedAudio, decode};
 pub use features::{FeatureFrame, FeatureTimeline, analyze};
+pub use spectrum::{BAND_COUNT, BAND_EDGES};

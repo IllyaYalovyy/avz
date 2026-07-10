@@ -31,6 +31,24 @@ light up `bass` and nothing else. A click train must produce onsets at known
 frame indices. An envelope follower fed a step must reach its attack target in
 the configured time. Silence must normalize without dividing by zero.
 
+The FFT half of that lives in `analysis/spectrum.rs` as pure functions over a
+magnitude spectrum and a bin width, which is what lets the band, flux, and
+centroid math be checked against spectra written by hand — a lone bin at a known
+frequency has a centroid nobody has to measure. `analysis/features.rs` owns
+window placement and the parallel drive loop, so its tests assert on whole
+synthesized songs instead. `the_same_song_analyzes_to_the_same_timeline_twice`
+guards a decision invisible from any single window: that rayon's reduction is
+index-ordered, not thread-completion-ordered.
+
+The VISION §5.1 performance budget — low single-digit seconds for a five-minute
+song, which is what the reused FFT planner and the parallel windows buy — is a
+smoke test in `crates/avz-core/tests/analysis_perf.rs`. It sits there rather than
+beside the code because it reads a wall clock, and
+`scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh` rightly
+forbids `Instant::now()` under `crates/avz-core/src`. It is `#[ignore]`d, since a
+loaded machine would make it flake as a per-commit gate; run it with
+`cargo test -p avz-core --test analysis_perf -- --ignored`.
+
 **Golden frames.** Render specific `(preset, seed, synthetic-feature)` frames to
 PNG with `--adapter software` and compare hashes in CI. The software adapter is
 what makes this stable across machines; never run golden tests on a hardware
@@ -118,7 +136,12 @@ exists, or `TODO` / `manual` with a reason.
 | Decoded sample count disagrees with the reported duration | Cumulative audio/visual drift over a long song | Unit | `decodes_fixture_to_expected_duration`, `mono_output_length_matches_duration_times_rate`, `a_stereo_source_decodes_to_one_channel` |
 | Truncated or corrupt mp3 panics, or is silently analyzed short | Crash, or visuals rendered against audio that keeps playing | Unit | `truncated_mp3_yields_input_error_not_panic`, `non_mp3_bytes_rejected` |
 | Decode resamples, or grows beyond mp3 | Hop math drifts off video frame timestamps; the binary carries codecs avz can never mux | Unit + quality hook | `a_stereo_source_decodes_to_one_channel`, `scripts/quality.d/40-decode-stays-mp3-only.sh` |
-| Band energies map to wrong frequency ranges | Visuals react to the wrong instruments; subtly off, never obviously broken | Unit | TODO |
+| Band energies map to wrong frequency ranges | Visuals react to the wrong instruments; subtly off, never obviously broken | Unit | `sine_at_60hz_lights_up_bass_band_only`, `sine_at_1khz_dominates_mid`, `sine_at_12khz_dominates_air`, `two_tone_signal_lights_both_bands`, `a_bin_belongs_to_the_band_holding_its_center_frequency`, `dc_and_ultrasound_belong_to_no_band` |
+| Spectral flux counts energy leaving as well as arriving | Every note *ending* reads as a hit; onsets fire between the beats | Unit | `flux_is_half_wave_rectified`, `steady_tone_has_near_zero_flux`, `tone_switch_spikes_flux_at_switch_frame` |
+| Spectral centroid divides by a silent spectrum | A `NaN` reaches a shader uniform and the frame paints black | Unit | `silence_centroid_is_zero_not_nan`, `the_centroid_of_a_silent_spectrum_is_zero_not_nan`, `a_single_bin_spectrum_has_no_centroid_rather_than_an_infinity` |
+| Edge analysis windows are zero-padded | The song reads ~3 dB quiet on its first frame and then "grows" into the second — an onset the music never played | Unit | `the_first_and_last_frames_read_as_loud_as_the_middle_of_the_song`, `a_song_shorter_than_one_window_still_analyzes` |
+| Parallel window analysis reduces in thread-completion order | A re-render of the same song is a different video | Unit | `the_same_song_analyzes_to_the_same_timeline_twice` |
+| FFT magnitudes scale with the window length | Band and onset thresholds silently become a function of `fps` | Unit | `a_full_scale_sine_reads_unit_amplitude_at_its_bin`, `the_hann_window_is_periodic_and_sums_to_half_its_length` |
 | Onset detection fires late or misses hits | Motion lags the beat — the core promise fails | Unit + manual | TODO |
 | Envelope follower attack/decay math wrong | Motion is twitchy or sluggish | Unit | TODO |
 | Normalization divides by zero on silence | Panic or NaN frames | Unit | TODO |
