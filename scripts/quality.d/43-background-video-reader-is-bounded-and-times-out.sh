@@ -33,9 +33,14 @@ if [[ ! -f ${reader} ]]; then
     exit 1
 fi
 
+# Only the production half of the file is scanned. `mod tests` asserts on the
+# very strings the checks below grep for -- `arg == "-an"` is one -- so a hook
+# that read the whole file would stay green on a reader that had lost the flag,
+# kept alive by the test that was supposed to catch it.
+#
 # Comment lines are excluded so the rule can be documented in the code it
 # constrains, exactly as in 10-core-is-ui-agnostic.sh.
-code=$(grep -vE '^[[:space:]]*(//|\*)' "${reader}" || true)
+code=$(sed '/^#\[cfg(test)\]/,$d' "${reader}" | grep -vE '^[[:space:]]*(//|\*)' || true)
 
 status=0
 
