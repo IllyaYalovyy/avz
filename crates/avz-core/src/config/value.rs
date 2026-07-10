@@ -438,6 +438,17 @@ pub struct Color {
     pub a: u8,
 }
 
+impl Color {
+    /// An opaque color from its three sRGB channels.
+    ///
+    /// `const` so the built-in palettes can be written as colors rather than as
+    /// strings that are parsed on every render
+    /// ([`palette::BUILT_INS`](crate::render::palette::BUILT_INS)).
+    pub const fn rgb(r: u8, g: u8, b: u8) -> Self {
+        Self { r, g, b, a: 0xff }
+    }
+}
+
 impl fmt::Display for Color {
     /// The shortest form that round-trips through [`FromStr`]: `#rrggbb` when
     /// the color is opaque, `#rrggbbaa` when it is not.
@@ -500,17 +511,30 @@ impl FromStr for Color {
 }
 
 /// The color scheme driving a preset: a built-in name or inline hex colors.
+///
+/// Resolved into the five colors the uniform carries by
+/// [`palette::resolve`](crate::render::palette::resolve), which is also where a
+/// name is checked against the built-ins.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Palette {
-    /// A built-in palette, e.g. `ember`. Resolved against the palette registry
-    /// in RFC-001 Step 16.
+    /// A built-in palette, e.g. `ember`.
     Named(String),
-    /// One to five colors given inline.
+    /// Colors given inline, resampled onto the uniform's five slots.
     Inline(Vec<Color>),
 }
 
-/// The most colors a palette can define; the shader uniform holds five.
-pub const MAX_PALETTE_COLORS: usize = 5;
+/// The fewest colors an inline palette can define.
+///
+/// One color is a color, not a palette: there is nothing to interpolate between
+/// and every slot of the uniform would hold it.
+pub const MIN_PALETTE_COLORS: usize = 2;
+
+/// The most colors an inline palette can define.
+///
+/// The uniform holds five, and anything between two and eight is resampled onto
+/// them. Past eight, the slots the user is writing outnumber the slots that
+/// exist by enough that the palette they get is not the palette they wrote.
+pub const MAX_PALETTE_COLORS: usize = 8;
 
 impl FromStr for Palette {
     type Err = ParseError;
@@ -522,11 +546,7 @@ impl FromStr for Palette {
         // palette. This is what lets `--palette '#1a1a2e,#e94560'` work without
         // TOML array syntax on the command line.
         if input.contains('#') {
-            let colors = input
-                .split(',')
-                .map(|color| color.trim().parse())
-                .collect::<ParseResult<Vec<Color>>>()?;
-            return Palette::inline(colors);
+            return Palette::from_hexes(input.split(','));
         }
 
         let named = !input.is_empty()
@@ -565,28 +585,43 @@ impl<'de> Visitor<'de> for PaletteVisitor {
         value.parse().map_err(de::Error::custom)
     }
 
+    /// Reads the entries as strings rather than as [`Color`]s so a bad one is
+    /// reported by its position in the array, the way the command-line form
+    /// reports it. `toml` names the line; only avz can name the entry.
     fn visit_seq<A: de::SeqAccess<'de>>(self, mut seq: A) -> Result<Palette, A::Error> {
-        let mut colors = Vec::new();
-        while let Some(color) = seq.next_element::<Color>()? {
-            colors.push(color);
+        let mut hexes: Vec<String> = Vec::new();
+        while let Some(hex) = seq.next_element::<String>()? {
+            hexes.push(hex);
         }
-        Palette::inline(colors).map_err(de::Error::custom)
+        Palette::from_hexes(hexes.iter().map(String::as_str)).map_err(de::Error::custom)
     }
 }
 
 impl Palette {
-    /// Build an inline palette, checking the color count against the shader
-    /// uniform's capacity.
-    pub fn inline(colors: Vec<Color>) -> ParseResult<Self> {
-        if colors.is_empty() {
-            return Err(ParseError::new(
-                "an inline palette needs at least one color",
-            ));
-        }
+    /// Build an inline palette from hex colors, naming the position of a bad one.
+    ///
+    /// The position is what makes the error usable: `palette = [.., .., "#gg0000"]`
+    /// reports entry 3, so nobody has to count commas.
+    fn from_hexes<'a>(hexes: impl IntoIterator<Item = &'a str>) -> ParseResult<Self> {
+        let colors = hexes
+            .into_iter()
+            .enumerate()
+            .map(|(index, hex)| {
+                hex.trim()
+                    .parse::<Color>()
+                    .map_err(|err| ParseError::new(format!("palette entry {}: {err}", index + 1)))
+            })
+            .collect::<ParseResult<Vec<Color>>>()?;
 
-        if colors.len() > MAX_PALETTE_COLORS {
+        Palette::inline(colors)
+    }
+
+    /// Build an inline palette, checking how many colors there are to resample.
+    pub fn inline(colors: Vec<Color>) -> ParseResult<Self> {
+        if !(MIN_PALETTE_COLORS..=MAX_PALETTE_COLORS).contains(&colors.len()) {
             return Err(ParseError::new(format!(
-                "an inline palette takes at most {MAX_PALETTE_COLORS} colors, got {}",
+                "an inline palette takes {MIN_PALETTE_COLORS} to {MAX_PALETTE_COLORS} colors, \
+                 got {}; they are resampled onto the five the shader uniform holds",
                 colors.len()
             )));
         }

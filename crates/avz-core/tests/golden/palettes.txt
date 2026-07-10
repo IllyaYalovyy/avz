@@ -1,0 +1,8 @@
+# Golden hashes of `pulse` frame 10 under every built-in palette: sha256 of the RGBA bytes of a
+# 320x180 software-adapter render, seed 1337, synthetic features.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+ember 0b8c9e2d387c51b83979eaf3a03714344df02071df4e8695b6f1584af5105964
+glacier 08a2be8a9e2c33fc55bbb2f805f3531fd48dc42c236c3b124e35681d7001e1ea
+verdant 5d12818d211c1c007bf21a1fd5e3ff367e3cd440c8437a24ecc3d04f759b8ea4
+mono e40809bda667014f5380aa3acaf05ca1741f5ea5b99b132eeecc504bdd254e56
+carpathian 1cc904773d5b2c2fd1ccba4ee0b21d61eb3277d90d2cb2f63cd0963f98c1e6d4

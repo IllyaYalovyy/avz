@@ -14,7 +14,8 @@
 use serde::Deserialize;
 
 use crate::config::{Color, closest};
-use crate::render::globals::{PARAM_SLOTS, linear_rgba};
+use crate::render::globals::PARAM_SLOTS;
+use crate::render::palette::linear_rgba;
 use crate::{Error, Result};
 
 /// Components in one `vec4<f32>` uniform slot.

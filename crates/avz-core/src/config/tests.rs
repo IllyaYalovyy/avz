@@ -564,22 +564,75 @@ fn parses_named_and_inline_palettes() {
     assert_eq!(colors.len(), 2);
 }
 
+/// An inline palette is resampled onto the uniform's five slots, so it may hold
+/// more colors than the uniform does — but not so many that the palette the user
+/// gets stops resembling the one they wrote.
 #[test]
-fn rejects_an_inline_palette_with_too_many_colors() {
-    let too_many = "#000000, ".repeat(MAX_PALETTE_COLORS + 1);
-    let colors: Vec<Color> = too_many
-        .trim_end_matches([',', ' '])
-        .split(", ")
-        .map(|c| c.parse().expect("parses"))
-        .collect();
+fn an_inline_palette_takes_between_two_and_eight_colors() {
+    let black: Color = "#000000".parse().expect("parses");
 
-    let err = Palette::inline(colors).expect_err("rejected");
-    assert!(err.to_string().contains("5"), "{err}");
+    for count in MIN_PALETTE_COLORS..=MAX_PALETTE_COLORS {
+        Palette::inline(vec![black; count]).unwrap_or_else(|err| panic!("{count} colors: {err}"));
+    }
+
+    for count in [0, MIN_PALETTE_COLORS - 1, MAX_PALETTE_COLORS + 1] {
+        let err = Palette::inline(vec![black; count]).expect_err("out of range");
+        let message = err.to_string();
+        assert!(
+            message.contains(&MIN_PALETTE_COLORS.to_string())
+                && message.contains(&MAX_PALETTE_COLORS.to_string()),
+            "{count} colors must be refused with the range that is allowed: {message}",
+        );
+    }
 }
 
+/// A single color is not a palette: every slot of the uniform would hold it, and
+/// there is nothing to interpolate between.
 #[test]
-fn rejects_an_empty_inline_palette() {
-    Palette::inline(Vec::new()).expect_err("rejected");
+fn rejects_an_inline_palette_of_one_color() {
+    let err = "#e94560".parse::<Palette>().expect_err("one color");
+    assert!(err.to_string().contains("got 1"), "{err}");
+}
+
+/// `--palette` outranks `--set visual.palette` and the config file, the way
+/// every other CLI flag does (`VISION.md` §5.5).
+#[test]
+fn a_palette_flag_beats_a_set_override_and_the_config_file() {
+    let cli = ConfigLayer {
+        visual: VisualLayer {
+            palette: Some(Palette::Named("mono".to_owned())),
+            ..VisualLayer::default()
+        },
+        ..ConfigLayer::default()
+    };
+
+    let sources = Sources {
+        file: layer("[visual]\npalette = \"glacier\"\n"),
+        set: ConfigLayer::from_set_assignments(["visual.palette=verdant"]).expect("--set parses"),
+        cli,
+        ..Sources::default()
+    };
+
+    let config = sources.resolve().expect("resolves");
+    assert_eq!(config.visual.palette, Palette::Named("mono".to_owned()));
+}
+
+/// A bad hex color is reported by its position in the array, so nobody counts
+/// commas to find it. Both spellings — the TOML array and the `--palette` string.
+#[test]
+fn bad_hex_rejected_with_position() {
+    let err = ConfigLayer::from_toml_str("[visual]\npalette = [\"#1a1a2e\", \"#gg0000\"]\n")
+        .expect_err("`#gg0000` is not a color");
+    assert!(err.to_string().contains("palette entry 2"), "{err}");
+
+    let err = "#1a1a2e,#e94560,e94560"
+        .parse::<Palette>()
+        .expect_err("the third color is missing its `#`");
+    assert!(err.to_string().contains("palette entry 3"), "{err}");
+
+    let err = ConfigLayer::from_toml_str("[visual]\npalette = []\n")
+        .expect_err("an empty list is not a palette");
+    assert!(err.to_string().contains("got 0"), "{err}");
 }
 
 #[test]

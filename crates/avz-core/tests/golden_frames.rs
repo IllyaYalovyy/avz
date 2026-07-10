@@ -24,15 +24,16 @@
 //!
 //! Needs Mesa's software Vulkan driver: `sudo dnf install mesa-vulkan-drivers`.
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use avz_core::analysis::FeatureFrame;
-use avz_core::config::Color;
+use avz_core::config::Palette;
 use avz_core::render::{
-    AdapterChoice, Globals, Gpu, Offscreen, PALETTE_SLOTS, PRESETS, PackedParams, ParamKind,
-    Preset, Visualizer,
+    AdapterChoice, BUILT_INS, Globals, Gpu, LinearPalette, Offscreen, PRESETS, PackedParams,
+    ParamKind, Preset, Visualizer, palette,
 };
 use sha2::{Digest, Sha256};
 
@@ -59,17 +60,26 @@ fn one_device_at_a_time() -> MutexGuard<'static, ()> {
         .unwrap_or_else(PoisonError::into_inner)
 }
 
-fn golden_file(preset: &Preset) -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/golden")
-        .join(format!("{}.txt", preset.name))
+fn golden_dir() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/golden")
 }
 
-fn palette() -> [Color; PALETTE_SLOTS] {
-    ["#1a1a2e", "#533483", "#e94560", "#f9a03f", "#ffd93d"].map(|hex| {
-        hex.parse()
-            .unwrap_or_else(|_| panic!("`{hex}` is a legal color"))
-    })
+fn golden_file(preset: &Preset) -> PathBuf {
+    golden_dir().join(format!("{}.txt", preset.name))
+}
+
+/// The palette every preset's golden hashes are rendered with.
+///
+/// `ember` is the default (`Config::default`), so the committed preset hashes
+/// are hashes of a zero-config render. The other four built-ins are pinned by
+/// `every_built_in_renders_its_golden_frame` instead.
+fn ember() -> LinearPalette {
+    named("ember")
+}
+
+fn named(name: &str) -> LinearPalette {
+    palette::resolve(&Palette::Named(name.to_owned()))
+        .unwrap_or_else(|err| panic!("`{name}` ships: {err}"))
 }
 
 /// The features of golden frame `frame_index`, built by hand.
@@ -155,6 +165,17 @@ fn render_hash_with(
     seed: u64,
     params: PackedParams,
 ) -> String {
+    render_hash_on(preset, frame_index, seed, ember(), params)
+}
+
+/// [`render_hash_with`], with the palette chosen by the caller too.
+fn render_hash_on(
+    preset: &Preset,
+    frame_index: usize,
+    seed: u64,
+    colors: LinearPalette,
+    params: PackedParams,
+) -> String {
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software)
         .expect("golden frames need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
@@ -167,7 +188,7 @@ fn render_hash_with(
         (WIDTH, HEIGHT),
         seed,
         synthetic_frame(frame_index),
-        palette(),
+        colors,
         params,
     );
     visualizer.draw(&gpu, &target, &globals);
@@ -184,10 +205,12 @@ fn hex(bytes: &[u8]) -> String {
         .collect()
 }
 
-/// `frame <index> <sha256>` per line, the way `tests/golden/<preset>.txt` stores it.
-fn recorded(preset: &Preset) -> Vec<(usize, String)> {
-    let path = golden_file(preset);
-    let text = fs::read_to_string(&path).unwrap_or_else(|err| {
+/// `<key> <sha256>` per line, the way every `tests/golden/*.txt` stores it.
+///
+/// The key is a frame index for a preset file and a palette name for
+/// `palettes.txt`; the format is the same so the regenerate ritual is too.
+fn read_golden(path: &PathBuf) -> Vec<(String, String)> {
+    let text = fs::read_to_string(path).unwrap_or_else(|err| {
         panic!(
             "{}: {err}. Regenerate with `AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core \
              --test golden_frames`",
@@ -199,33 +222,39 @@ fn recorded(preset: &Preset) -> Vec<(usize, String)> {
         .map(str::trim)
         .filter(|line| !line.is_empty() && !line.starts_with('#'))
         .map(|line| {
-            let (index, hash) = line
+            let (key, hash) = line
                 .split_once(char::is_whitespace)
-                .unwrap_or_else(|| panic!("`{line}` is not `<frame> <sha256>`"));
-            (
-                index
-                    .parse()
-                    .unwrap_or_else(|_| panic!("`{index}` is a frame index")),
-                hash.trim().to_owned(),
-            )
+                .unwrap_or_else(|| panic!("`{line}` is not `<key> <sha256>`"));
+            (key.to_owned(), hash.trim().to_owned())
         })
         .collect()
 }
 
-fn write_golden(preset: &Preset, hashes: &[(usize, String)]) {
-    let path = golden_file(preset);
+fn write_golden(path: &PathBuf, header: &str, hashes: &[(String, String)]) {
     fs::create_dir_all(path.parent().expect("tests/golden")).expect("create tests/golden");
 
     let mut text = format!(
-        "# Golden frame hashes for the `{}` preset: sha256 of the RGBA bytes of a\n\
+        "# {header}: sha256 of the RGBA bytes of a\n\
          # {WIDTH}x{HEIGHT} software-adapter render, seed {GOLDEN_SEED}, synthetic features.\n\
          # Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames\n",
-        preset.name,
     );
-    for (index, hash) in hashes {
-        text.push_str(&format!("{index} {hash}\n"));
+    for (key, hash) in hashes {
+        text.push_str(&format!("{key} {hash}\n"));
     }
-    fs::write(&path, text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    fs::write(path, text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+}
+
+/// The recorded hashes of one preset, keyed by frame index.
+fn recorded(preset: &Preset) -> Vec<(usize, String)> {
+    read_golden(&golden_file(preset))
+        .into_iter()
+        .map(|(index, hash)| {
+            let index = index
+                .parse()
+                .unwrap_or_else(|_| panic!("`{index}` is a frame index"));
+            (index, hash)
+        })
+        .collect()
 }
 
 fn updating() -> bool {
@@ -244,7 +273,15 @@ fn every_preset_renders_its_golden_frames() {
             .collect();
 
         if updating() {
-            write_golden(preset, &hashes);
+            let text: Vec<(String, String)> = hashes
+                .iter()
+                .map(|(index, hash)| (index.to_string(), hash.clone()))
+                .collect();
+            write_golden(
+                &golden_file(preset),
+                &format!("Golden frame hashes for the `{}` preset", preset.name),
+                &text,
+            );
             continue;
         }
 
@@ -257,6 +294,116 @@ fn every_preset_renders_its_golden_frames() {
             preset.name,
         );
     }
+}
+
+/// The frame every built-in palette is pinned at.
+///
+/// Frame 10 drives every envelope, so the background (slot 0) and the whole
+/// accent ramp (slots 1..4) are on screen at once. A palette whose only
+/// difference from another lived in a slot this frame does not read would slip
+/// through the distinctness check below.
+const PALETTE_FRAME: usize = 10;
+
+fn palette_golden_file() -> PathBuf {
+    golden_dir().join("palettes.txt")
+}
+
+/// Every built-in renders `pulse` into a different, stable picture.
+///
+/// Two failures live here, and no other test would see either. A palette that
+/// reaches no pixel — resolved, uploaded, and then ignored — makes `--palette`
+/// decoration, and every hash below would be the same string. And a change to a
+/// built-in's colors, or to the Oklab resample under them, silently rewrites
+/// every video anyone ever rendered with that name.
+#[test]
+fn every_built_in_palette_renders_a_distinct_stable_frame() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+
+    let hashes: Vec<(String, String)> = BUILT_INS
+        .iter()
+        .map(|built_in| {
+            let hash = render_hash_on(
+                preset,
+                PALETTE_FRAME,
+                GOLDEN_SEED,
+                named(built_in.name),
+                defaults(preset),
+            );
+            (built_in.name.to_owned(), hash)
+        })
+        .collect();
+
+    // Checked before the regenerate branch: `AVZ_UPDATE_GOLDEN=1` must never be
+    // able to bless two names that render one picture.
+    let distinct: BTreeSet<&str> = hashes.iter().map(|(_, hash)| hash.as_str()).collect();
+    assert_eq!(
+        distinct.len(),
+        BUILT_INS.len(),
+        "two built-in palettes render the same frame: {hashes:?}",
+    );
+
+    if updating() {
+        write_golden(
+            &palette_golden_file(),
+            &format!("Golden hashes of `pulse` frame {PALETTE_FRAME} under every built-in palette"),
+            &hashes,
+        );
+        return;
+    }
+
+    assert_eq!(
+        read_golden(&palette_golden_file()),
+        hashes,
+        "a built-in palette no longer renders the frame its hash was committed \
+         from. If the change was intended, regenerate with `AVZ_UPDATE_GOLDEN=1 \
+         cargo test -p avz-core --test golden_frames` and say in the commit \
+         message which palette moved.",
+    );
+
+    // `ember` is the default, so the preset's own golden frame must be the frame
+    // `ember` renders. Without this the two files could drift apart and each
+    // stay internally consistent.
+    let ember = hashes
+        .iter()
+        .find(|(name, _)| name == "ember")
+        .map(|(_, hash)| hash.clone())
+        .expect("`ember` ships");
+    let from_preset_file = recorded(preset)
+        .into_iter()
+        .find(|(index, _)| *index == PALETTE_FRAME)
+        .map(|(_, hash)| hash)
+        .expect("frame 10 is a golden frame");
+    assert_eq!(
+        ember, from_preset_file,
+        "the preset golden frames were rendered with a palette that is not the default",
+    );
+}
+
+/// An inline palette reaches the pixels, and not by accident of length: two
+/// colors are resampled onto five slots, and the frame that comes out is not the
+/// frame any built-in renders.
+#[test]
+fn an_inline_palette_reaches_the_pixels() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+    let inline = palette::resolve(&Palette::Inline(vec![
+        "#04070f".parse().expect("a color"),
+        "#f2e9d8".parse().expect("a color"),
+    ]))
+    .expect("two colors resolve");
+
+    let drawn = render_hash_on(preset, PALETTE_FRAME, GOLDEN_SEED, inline, defaults(preset));
+    let ember = render_hash_on(
+        preset,
+        PALETTE_FRAME,
+        GOLDEN_SEED,
+        named("ember"),
+        defaults(preset),
+    );
+
+    assert_ne!(
+        drawn, ember,
+        "an inline palette resolves but never reaches a pixel"
+    );
 }
 
 /// A value away from the schema's default, whatever the parameter's type.
@@ -433,7 +580,7 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
             (WIDTH, HEIGHT),
             GOLDEN_SEED,
             features,
-            palette(),
+            ember(),
             params,
         );
         visualizer.draw(&gpu, &target, &globals);
@@ -530,7 +677,7 @@ fn dump_pulse_tuning_frames() {
             (WIDTH, HEIGHT),
             GOLDEN_SEED,
             features,
-            palette(),
+            ember(),
             params,
         );
         visualizer.draw(&gpu, &target, &globals);

@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use avz_core::config::{ConfigLayer, Sources};
+use avz_core::config::{ConfigLayer, Sources, VisualLayer};
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
 use avz_core::render::AdapterKind;
@@ -52,6 +52,7 @@ pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
             None => ConfigLayer::default(),
         },
         set: ConfigLayer::from_set_assignments(&args.set)?,
+        cli: cli_layer(args),
         ..Sources::default()
     }
     .resolve()?;
@@ -74,6 +75,21 @@ pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// The settings named by individual CLI flags — the top of the precedence chain.
+///
+/// A flag the user did not pass stays `None`, so it cannot displace the config
+/// file. That is why `--palette` has no clap default: `ember` is the *built-in*
+/// default, and a flag defaulting to it would outrank every config file.
+fn cli_layer(args: &RenderArgs) -> ConfigLayer {
+    ConfigLayer {
+        visual: VisualLayer {
+            palette: args.palette.clone(),
+            ..VisualLayer::default()
+        },
+        ..ConfigLayer::default()
+    }
 }
 
 /// `<song-stem>.mp4` next to the input (`VISION.md` §3).
@@ -179,6 +195,38 @@ mod tests {
     use std::fs;
 
     use super::*;
+
+    fn render_args(args: &[&str]) -> RenderArgs {
+        use clap::Parser as _;
+
+        let argv = ["avz", "render", "song.mp3"].iter().chain(args);
+        match crate::cli::Cli::try_parse_from(argv)
+            .expect("parses")
+            .command
+        {
+            crate::cli::Command::Render(args) => args,
+            other => panic!("expected a render command, got {other:?}"),
+        }
+    }
+
+    /// The flag reaches the layer that outranks `--set` and `--config`. Without
+    /// this, `--palette` parses, validates, and is silently dropped.
+    #[test]
+    fn the_palette_flag_reaches_the_cli_config_layer() {
+        let layer = cli_layer(&render_args(&["--palette", "glacier"]));
+
+        assert_eq!(
+            layer.visual.palette,
+            Some(avz_core::config::Palette::Named("glacier".to_owned())),
+        );
+    }
+
+    /// An unpassed flag must have no opinion, or it would displace the config
+    /// file from the top of the precedence chain.
+    #[test]
+    fn a_render_without_flags_contributes_an_empty_cli_layer() {
+        assert_eq!(cli_layer(&render_args(&[])), ConfigLayer::default());
+    }
 
     #[test]
     fn the_default_output_sits_next_to_the_input_with_an_mp4_extension() {

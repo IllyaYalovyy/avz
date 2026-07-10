@@ -26,8 +26,8 @@ use serde::Deserialize;
 use crate::{Error, Result};
 
 pub use value::{
-    Codec, Color, Fit, FontChoice, MAX_PALETTE_COLORS, Palette, ParseError, Position, Resolution,
-    SampleRange, Seconds, Seed,
+    Codec, Color, Fit, FontChoice, MAX_PALETTE_COLORS, MIN_PALETTE_COLORS, Palette, ParseError,
+    Position, Resolution, SampleRange, Seconds, Seed,
 };
 
 /// A fully-resolved, validated configuration.
@@ -400,6 +400,9 @@ impl ConfigLayer {
             config.visual.preset = preset;
         }
         if let Some(palette) = self.visual.palette {
+            // A named palette is checked against the registry by the renderer,
+            // the way `visual.preset` is: both happen before the song is
+            // decoded, and neither makes this module depend on `render`.
             config.visual.palette = palette;
         }
         if let Some(intensity) = self.visual.intensity {

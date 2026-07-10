@@ -99,8 +99,12 @@ loaded machine would make it flake as a per-commit gate; run it with
 **Golden frames.** `crates/avz-core/tests/golden_frames.rs` renders specific
 `(preset, seed, synthetic-feature)` frames on the software adapter and compares
 the sha256 of their RGBA bytes against `crates/avz-core/tests/golden/<preset>.txt`.
-The software adapter is what makes this stable across machines; never run golden
-tests on a hardware adapter, because GPU float differences are expected, and
+`crates/avz-core/tests/golden/palettes.txt` pins the same thing for the other
+axis: one `pulse` frame under each built-in palette, which is what catches a
+palette whose colors moved and a palette that renders no differently from its
+neighbour. The software adapter is what makes this stable across machines; never
+run golden tests on a hardware adapter, because GPU float differences are
+expected, and
 `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` enforces it.
 This catches shader regressions cheaply.
 
@@ -293,6 +297,13 @@ exists, or `TODO` / `manual` with a reason.
 | A `--set` shorthand swallows a mistyped config section | `outputt.fps=30` is reported as an unknown preset *parameter*, pointing at the wrong mistake | Unit | `a_set_key_under_an_unknown_section_names_the_sections_and_the_presets`, `a_bare_set_key_is_a_parameter_of_the_active_preset`, `a_preset_prefixed_set_key_is_a_parameter_of_that_preset`, `the_shorthand_and_the_long_form_set_the_same_parameter` |
 | An int parameter silently accepts a float, or a bool a string | `ring_count = 4.5` renders 4 rings nobody asked for | Unit | `an_int_parameter_rejects_a_float`, `a_bool_parameter_rejects_the_string_true`, `a_float_parameter_accepts_a_bare_integer` |
 | A `color` parameter reaches the shader in sRGB rather than linear | The tint is a stop and a half off, exactly like a mis-linearized palette | Unit | `a_color_parameter_is_linearized_across_its_whole_slot` |
+| The palette reaches the shader in sRGB rather than linear | Every palette washes out by a stop and a half, in every preset at once | Unit | `srgb_to_linear_round_trip_within_epsilon`, `named_palette_resolves_to_five_linear_colors`, `the_resolved_palette_reaches_the_shader_unaltered` |
+| A built-in palette's colors drift | Every video anyone rendered under that name is silently rewritten | Golden frames | `every_built_in_palette_renders_a_distinct_stable_frame` |
+| Two built-in palettes render one picture | `--palette` offers five choices and delivers fewer | Golden frames | `every_built_in_palette_renders_a_distinct_stable_frame`, `no_two_built_ins_resolve_to_the_same_colors` |
+| `--palette` resolves but never reaches a pixel | The flag is decoration; every render draws the default palette | Unit + golden frames | `the_palette_flag_reaches_the_cli_config_layer`, `an_inline_palette_reaches_the_pixels` |
+| An inline palette is resampled by a blend that muddies the middle slots | A two-color palette's midpoint is olive; resampling is worse than not offering it | Unit | `inline_two_colors_interpolate_to_five`, `oklab_round_trips_through_linear_rgb`, `a_resampled_palette_never_leaves_the_gamut` |
+| A typo'd `--palette` renders something, or fails after the decode | A five-minute wait for a one-word error | Unit + integration + CLI | `unknown_palette_name_lists_valid_names`, `an_unknown_palette_fails_before_the_song_is_even_decoded`, `render_with_an_unknown_palette_exits_2_and_names_the_known_ones` |
+| A malformed inline hex color is rejected without saying which one | The user counts commas to find the typo | Unit + CLI | `bad_hex_rejected_with_position`, `render_with_a_malformed_inline_palette_exits_2_and_names_the_entry` |
 | Adding a preset requires touching code outside `presets/` | The abstraction VISION §6 promises is wrong, and the four deferred presets get expensive | Quality hook | `scripts/quality.d/96-a-preset-is-only-files-in-presets.sh` |
 | `avz presets` omits a preset, a column, or a `perf_hint` | UT-004 discovery fails; a parameter exists that nobody can find | Unit (CLI formatter) + CLI | `the_listing_names_every_preset_and_describes_it`, `the_schema_print_shows_every_column_for_every_type`, `the_schema_columns_are_aligned`, `a_perf_hint_is_printed_when_the_schema_carries_one`, `presets_command_lists_all_registered`, `presets_name_prints_schema_fields` |
 | `--config` or `--set` never reaches the pipeline | The reproducible-render promise of UT-007 is decoration | CLI | `a_config_files_preset_params_are_validated_against_the_schema`, `a_set_override_beats_an_illegal_value_in_the_config_file`, `unknown_param_via_set_exits_2_with_a_suggestion` |

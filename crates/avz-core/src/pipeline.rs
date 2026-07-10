@@ -13,10 +13,10 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::analysis::{self, EnvelopeParams};
-use crate::config::{Color, Config, SampleRange, Seed};
+use crate::config::{Config, SampleRange, Seed};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::render::{
-    AdapterChoice, AdapterKind, Globals, Gpu, Offscreen, PALETTE_SLOTS, Preset, Visualizer,
+    AdapterChoice, AdapterKind, Globals, Gpu, Offscreen, Preset, Visualizer, palette,
 };
 use crate::{Error, Phase, Progress, Result};
 
@@ -81,10 +81,11 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let config = request.config;
     let fps = config.output.fps;
     // Before decoding a five-minute song: a typo'd preset name, an unknown
-    // parameter, or a value outside its range are all the user's arguments, and
-    // they should hear about them in the first millisecond.
+    // parameter, a value outside its range, or an unknown palette are all the
+    // user's arguments, and they should hear about them in the first millisecond.
     let preset = Preset::by_name(&config.visual.preset)?;
     let params = preset.schema()?.resolve(&config.visual.params)?;
+    let palette = palette::resolve(&config.visual.palette)?;
 
     progress.phase_started(Phase::Analyzing, None);
     let audio = analysis::decode(request.input)?;
@@ -138,7 +139,7 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
             (resolution.width, resolution.height),
             seed,
             timeline.frame(index),
-            DEFAULT_PALETTE,
+            palette,
             params,
         );
         visualizer.draw(&gpu, &target, &globals);
@@ -159,44 +160,6 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         output: request.output.to_path_buf(),
     })
 }
-
-/// `ember`, hardcoded until RFC-001 Step 16 resolves `visual.palette`.
-///
-/// Slot 0 is the background a preset sits on; slots 1..4 are the accent ramp a
-/// preset walks (`presets/pulse.wgsl`, `fn accent`). sRGB here, linearized on
-/// the way into the uniform by [`Globals::for_frame`].
-const DEFAULT_PALETTE: [Color; PALETTE_SLOTS] = [
-    Color {
-        r: 0x1a,
-        g: 0x1a,
-        b: 0x2e,
-        a: 0xff,
-    },
-    Color {
-        r: 0x53,
-        g: 0x34,
-        b: 0x83,
-        a: 0xff,
-    },
-    Color {
-        r: 0xe9,
-        g: 0x45,
-        b: 0x60,
-        a: 0xff,
-    },
-    Color {
-        r: 0xf9,
-        g: 0xa0,
-        b: 0x3f,
-        a: 0xff,
-    },
-    Color {
-        r: 0xff,
-        g: 0xd9,
-        b: 0x3d,
-        a: 0xff,
-    },
-];
 
 /// The seed `auto` stands for, until RFC-001 Step 22 derives it from the input
 /// file name.
@@ -295,7 +258,7 @@ fn audio_start(range: FrameRange, fps: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::Seconds;
+    use crate::config::{Palette, Seconds};
 
     fn sample(start: &str, end: &str) -> SampleRange {
         format!("{start}..{end}").parse().expect("a sample range")
@@ -309,15 +272,14 @@ mod tests {
         assert_eq!(seed_value(Seed::Auto), seed_value(Seed::Auto));
     }
 
-    /// Slot 0 is the background; a preset walks slots 1..4 as its accent ramp.
-    /// Five slots is what the uniform holds (`VISION.md` §6).
+    /// The zero-config render has to resolve. A default naming a palette nobody
+    /// ships would fail every `avz render song.mp3`.
     #[test]
-    fn the_default_palette_fills_every_uniform_slot() {
-        assert_eq!(DEFAULT_PALETTE.len(), PALETTE_SLOTS);
-        assert!(
-            DEFAULT_PALETTE.iter().all(|color| color.a == 0xff),
-            "a translucent palette slot would wash the preset out"
-        );
+    fn the_default_config_names_a_palette_that_resolves() {
+        let config = Config::default();
+
+        assert_eq!(config.visual.palette, Palette::Named("ember".to_owned()));
+        palette::resolve(&config.visual.palette).expect("the default palette resolves");
     }
 
     #[test]
