@@ -2850,23 +2850,37 @@ fn dump_ink_tuning_frames() {
 
 /// The panel presets (#31, #32): a visualization that lives in one anchored
 /// rectangle and leaves the rest of the frame to the backdrop.
-const PANEL_PRESETS: &[&str] = &["bars"];
+const PANEL_PRESETS: &[&str] = &["bars", "meter"];
 
-/// The pixel rectangle a panel preset's defaults claim, from the same
-/// arithmetic the shader does: fractions of the frame for the size, a fraction
-/// of the short edge for the margin, anchored bottom-left.
-fn default_panel_rect(width: f32, height: f32, margin: f32) -> (u32, u32, u32, u32) {
-    let panel_w = width * WIDTH as f32;
-    let panel_h = height * HEIGHT as f32;
-    let m = margin * WIDTH.min(HEIGHT) as f32;
+/// The pixel rectangle `preset`'s defaults claim, from the same arithmetic its
+/// shader does: fractions of the frame for the size, a fraction of the short
+/// edge for the margin and — for `meter` — the thickness. Each panel preset
+/// names its geometry differently, so the mapping is spelled per preset.
+fn default_panel_rect(name: &str, default_of: &dyn Fn(&str) -> f32) -> (u32, u32, u32, u32) {
+    let short = WIDTH.min(HEIGHT) as f32;
+    let m = default_of("margin") * short;
 
-    let x0 = m;
-    let y1 = HEIGHT as f32 - m;
+    // (panel size, anchored corner) per preset: `bars` sits bottom-left,
+    // `meter` bottom-right and vertical, both by their schema defaults.
+    let (panel_w, panel_h, x0, y0) = match name {
+        "bars" => {
+            let w = default_of("width") * WIDTH as f32;
+            let h = default_of("height") * HEIGHT as f32;
+            (w, h, m, HEIGHT as f32 - m - h)
+        }
+        "meter" => {
+            let w = default_of("thickness") * short;
+            let h = default_of("length") * HEIGHT as f32;
+            (w, h, WIDTH as f32 - m - w, HEIGHT as f32 - m - h)
+        }
+        other => panic!("`{other}` has no panel-rect rule; add one here"),
+    };
+
     (
         x0 as u32,
-        (y1 - panel_h) as u32,
+        y0 as u32,
         (x0 + panel_w) as u32,
-        y1 as u32,
+        (y0 + panel_h) as u32,
     )
 }
 
@@ -2929,11 +2943,7 @@ fn a_panel_preset_lights_only_its_panel() {
                 ref other => panic!("`{param}` is {}, expected float", other.type_name()),
             }
         };
-        let (x0, y0, x1, y1) = default_panel_rect(
-            default_of("width"),
-            default_of("height"),
-            default_of("margin"),
-        );
+        let (x0, y0, x1, y1) = default_panel_rect(name, &default_of);
         const SLACK: u32 = 2;
 
         let mut inside_changed = 0u32;
