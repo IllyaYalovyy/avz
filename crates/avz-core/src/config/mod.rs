@@ -94,7 +94,8 @@ pub struct Background {
 pub enum BackgroundSource {
     /// A static image.
     Image(PathBuf),
-    /// A looped, muted video. Rejected by the renderer until RFC-001 NG2 lands.
+    /// A looped, muted video. Decoded by an ffmpeg of its own, one frame per
+    /// rendered frame ([`BackgroundVideo`](crate::render::BackgroundVideo)).
     Video(PathBuf),
 }
 

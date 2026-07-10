@@ -103,7 +103,9 @@ pub fn example() -> String {
         "image = \"art/forest.png\"",
     ));
     out.push_str(&commented(
-        "A looped, muted video beneath the visuals. Not supported in v0.1.",
+        "A looped, muted video beneath the visuals. Mutually exclusive with `image`.\n\
+         ffmpeg loops, scales, and frame-rate-converts it; it always starts at its\n\
+         first frame, so `--sample` moves the song and never the loop.",
         "video = \"loops/smoke.mp4\"",
     ));
     key(

@@ -10,8 +10,9 @@
 //! coverage into the visualizer layer and never sees what is beneath it; the
 //! [`Background`] under it is the palette [`Backdrop`], optionally with a fitted,
 //! blurred, and darkened image over it, rather than the black the presets used to
-//! paint for themselves. The [`TextCard`] on top of it is rasterized once and
-//! then only animated.
+//! paint for themselves. A [`BackgroundVideo`] is that image once per frame,
+//! decoded and looped by an ffmpeg of its own. The [`TextCard`] on top of it is
+//! rasterized once and then only animated.
 //!
 //! A preset draws against the uniform and, if its schema asks, against the three
 //! optional textures `VISION.md` §6 allows it: the previous frame
@@ -38,6 +39,7 @@ pub mod readback;
 pub mod schema;
 pub mod spectrum;
 pub mod text;
+pub mod video;
 
 pub use adapter::{AdapterChoice, AdapterKind};
 pub use background::{Backdrop, Background};
@@ -53,3 +55,4 @@ pub use readback::RowLayout;
 pub use schema::{PackedParams, Param, ParamKind, PresetSchema, SLOT_COMPONENTS, Slot};
 pub use spectrum::Spectrum;
 pub use text::{Card, CardText, TextCard};
+pub use video::{BackgroundVideo, VideoSettings};

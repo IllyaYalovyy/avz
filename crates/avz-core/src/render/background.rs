@@ -2,8 +2,10 @@
 //!
 //! `VISION.md` §5.3 lists three things the background layer can be: a solid
 //! color or gradient from the palette, a static image, or a looped video. The
-//! first two live here; the video is RFC-001 NG2 and is refused with a message
-//! that says so.
+//! first two live here. The video is a layer of its own
+//! ([`video`](crate::render::video)), because it has a frame per rendered frame
+//! and this one is built once; under it, this layer is the bare palette backdrop
+//! its letterbox bars show through.
 //!
 //! Before the compositor existed, every preset opened by painting `pal[0]` over
 //! the frame and the render target was cleared to black behind it. That is now
@@ -126,20 +128,25 @@ impl Background {
     /// is the user's argument, and they should hear about it in the first
     /// millisecond rather than after a five-minute analysis pass.
     ///
+    /// A `background.video` is *not* decoded here: it has a frame per rendered
+    /// frame and an ffmpeg of its own ([`BackgroundVideo`]). What this layer
+    /// becomes for it is the palette backdrop alone — which is what a `contain`
+    /// letterbox shows through, exactly as under an image. Its path is still
+    /// checked, because that is the point of loading before the song is decoded.
+    ///
     /// # Errors
     ///
-    /// [`Error::Input`] if the image cannot be read or decoded, naming the path.
-    /// [`Error::Config`] for `background.video`, which RFC-001 defers (NG2).
+    /// [`Error::Input`] if the image cannot be read or decoded, or if the video
+    /// is not there, naming the path.
+    ///
+    /// [`BackgroundVideo`]: crate::render::BackgroundVideo
     pub fn load(config: &BackgroundConfig) -> Result<Self> {
         let image = match &config.source {
             None => None,
             Some(BackgroundSource::Image(path)) => Some(decode(path)?),
             Some(BackgroundSource::Video(path)) => {
-                return Err(Error::Config(format!(
-                    "`background.video` is not supported yet, so `{}` cannot be rendered; \
-                     use `background.image` instead",
-                    path.display(),
-                )));
+                exists(path)?;
+                None
             }
         };
 
@@ -344,6 +351,17 @@ fn draw(canvas: &mut Rgb32FImage, image: &Rgba32FImage, fit: Fit) {
             *behind = over + (1.0 - alpha) * *behind;
         }
     }
+}
+
+/// Fail if `path` is not a file avz can open.
+///
+/// The video itself is ffmpeg's to read, and ffmpeg is not spawned until the
+/// song has been analyzed. A typo'd `background.video` would otherwise cost a
+/// full analysis pass before anyone mentioned it.
+fn exists(path: &Path) -> Result<()> {
+    std::fs::File::open(path)
+        .map(drop)
+        .map_err(|err| Error::Input(format!("`{}`: {err}", path.display())))
 }
 
 /// Read and decode a background image.
@@ -808,6 +826,24 @@ mod tests {
         );
     }
 
+    /// A background video that does not exist is the user's argument too, and it
+    /// must be caught here rather than by an ffmpeg spawned after the song has
+    /// been decoded and the first frame drawn.
+    #[test]
+    fn a_missing_background_video_is_an_input_error_naming_the_path() {
+        let config = BackgroundConfig {
+            source: Some(BackgroundSource::Video("/no/such/smoke.mp4".into())),
+            fit: Fit::Cover,
+            blur: 0.0,
+            darken: 0.0,
+        };
+
+        let err = Background::load(&config).expect_err("there is no such file");
+
+        assert!(matches!(err, Error::Input(_)), "got {err:?}");
+        assert!(err.to_string().contains("smoke.mp4"), "{err}");
+    }
+
     /// A background image that does not exist is the user's argument, and the
     /// error names the path they typed.
     #[test]
@@ -846,25 +882,25 @@ mod tests {
         assert!(err.to_string().contains("forest.png"), "{err}");
     }
 
-    /// `background.video` parses and validates, and the renderer has nowhere to
-    /// put it until RFC-001 NG2 lands. Say so rather than ignoring the key.
+    /// `background.video` is decoded per frame by
+    /// [`BackgroundVideo`](crate::render::BackgroundVideo), not here. This layer
+    /// is then the palette backdrop the video's letterbox bars show through, and
+    /// it must hold no image of its own.
     #[test]
-    fn a_background_video_is_refused_with_a_message_that_says_it_is_not_built_yet() {
+    fn a_background_video_leaves_this_layer_as_the_backdrop_it_shows_through() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source = dir.path().join("smoke.mp4");
+        std::fs::write(&source, b"not really a video, but it exists").expect("write");
+
         let config = BackgroundConfig {
-            source: Some(BackgroundSource::Video("loops/smoke.mp4".into())),
+            source: Some(BackgroundSource::Video(source)),
             fit: Fit::Cover,
             blur: 0.0,
             darken: 0.0,
         };
 
-        let err = Background::load(&config).expect_err("the video layer does not exist");
+        let background = Background::load(&config).expect("a video needs no decoding here");
 
-        assert!(matches!(err, Error::Config(_)), "got {err:?}");
-        let message = err.to_string();
-        assert!(message.contains("smoke.mp4"), "{message}");
-        assert!(
-            message.contains("background.image"),
-            "say what to do: {message}"
-        );
+        assert_eq!(background.image_size(), None);
     }
 }

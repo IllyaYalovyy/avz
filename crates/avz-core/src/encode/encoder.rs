@@ -88,8 +88,7 @@ const X264_PRESET: &str = "slow";
 ///
 /// Configuration rather than an encode failure, and therefore exit 2 rather than
 /// exit 4 (`VISION.md` §8): `--codec av1` is a thing the user typed, and it will
-/// fail every song in a batch the same way. This is where `background.video`,
-/// the other v0.1 deferral, already lands.
+/// fail every song in a batch the same way.
 pub fn video_encoder(codec: Codec) -> Result<&'static str> {
     match codec {
         Codec::X264 => Ok("libx264"),
