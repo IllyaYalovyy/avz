@@ -393,7 +393,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 - [x] **Step 18** - Compositor pass: premultiplied-alpha layer stack *(prerequisite: Step 14)*
 - [x] **Step 19** - Background image layer: fit modes, blur, darken *(prerequisite: Step 18)*
-- [ ] **Step 20** - Text card layer: cosmic-text, ID3 defaults, timing *(prerequisite: Step 18)*
+- [x] **Step 20** - Text card layer: cosmic-text, ID3 defaults, timing *(prerequisite: Step 18)*
 
 **M5 — Polish & release v0.1** *(accept: an album batch-renders unattended)*
 

@@ -7,8 +7,8 @@
 //!
 //! Nothing here knows what a layer *is*. A [`Layer`] is a frame-sized texture of
 //! premultiplied light, and the compositor takes a slice of them. The background
-//! image (RFC-001 Step 19) and the text card (Step 20) are two more entries in
-//! that slice and no more code in this file.
+//! image and the text card are two more entries in that slice and no more code
+//! in this file; the looped background video (RFC-001 NG2) will be a third.
 //!
 //! **Absent layers cost nothing.** A stack the caller did not put a layer into
 //! has no bind group and no draw call for it — not a black quad, not a cleared

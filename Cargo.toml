@@ -15,6 +15,11 @@ avz-core = { path = "crates/avz-core", version = "0.1.0" }
 
 anyhow = "1.0"
 clap = { version = "4.5", features = ["derive"] }
+# Text card shaping and rasterization. `default-features = false` drops
+# `fontconfig` and `sys-locale`: the card must rasterize from the bundled OFL
+# font and nothing else, or the same render would draw different glyphs on two
+# machines (AGENTS.md, determinism).
+cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 lofty = "0.22"
 pollster = "0.4"

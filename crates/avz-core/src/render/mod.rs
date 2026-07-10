@@ -10,7 +10,8 @@
 //! coverage into the visualizer layer and never sees what is beneath it; the
 //! [`Background`] under it is the palette [`Backdrop`], optionally with a fitted,
 //! blurred, and darkened image over it, rather than the black the presets used to
-//! paint for themselves.
+//! paint for themselves. The [`TextCard`] on top of it is rasterized once and
+//! then only animated.
 //!
 //! Animation time is always `frame_index / fps`, never wall clock. Readback
 //! row-padding (256-byte alignment) is handled in exactly one place:
@@ -29,6 +30,7 @@ pub mod palette;
 pub mod preset;
 pub mod readback;
 pub mod schema;
+pub mod text;
 
 pub use adapter::{AdapterChoice, AdapterKind};
 pub use background::{Backdrop, Background};
@@ -41,3 +43,4 @@ pub use palette::{BUILT_INS, BuiltIn, LinearPalette};
 pub use preset::{PRESETS, Preset, Visualizer};
 pub use readback::RowLayout;
 pub use schema::{PackedParams, Param, ParamKind, PresetSchema, SLOT_COMPONENTS, Slot};
+pub use text::{Card, CardText, TextCard};

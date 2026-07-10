@@ -21,9 +21,9 @@ request that does not serve it goes to the backlog.
 pipeline — decode, full FFT analysis with envelopes and onsets, the `pulse`
 preset on the GPU, ffmpeg encode with the original audio muxed untouched — and
 `avz probe` reports tags. `avz presets` lists what ships and prints a preset's
-parameter schema; `--config`, `--set`, `--palette`, and `--bg` configure it. The
-text card arrives later in M4, so `--preset` below is not a flag yet, and
-`avz config` still exits with "not implemented yet".
+parameter schema; `--config`, `--set`, `--palette`, `--bg`, and the text-card
+flags configure it. `--preset` below is not a flag yet, and `avz config` still
+exits with "not implemented yet".
 
 **Palettes.** `--palette` takes a built-in name — `ember`, `glacier`, `verdant`,
 `mono`, or `carpathian` — or two to eight inline hex colors, which avz resamples
@@ -46,6 +46,22 @@ avz render song.mp3 --bg art/forest.png \
 
 A looped background video is planned but not built; `background.video` is
 refused with a message that says so.
+
+**Text card.** The title and artist are read from the song's ID3 tags and set in
+a bundled OFL font over the visuals — fading in at `text.in_at`, holding for
+`text.hold`, and fading out again. `--title` and `--artist` override the tags,
+and `--no-text` draws no card at all. A song with neither tag and no override
+renders without a card, and says so:
+
+```bash
+avz render song.mp3 --title 'Cold Design' --artist 'avz'
+avz render song.mp3 --no-text
+avz render song.mp3 --set text.position=top-right --set text.size=0.06
+```
+
+Type size and margins are fractions of the frame height, so 720p and 4k are the
+same picture at different scales. `text.position` is the nine-grid from
+`VISION.md` §5.3, and `text.font` may point at a font file of your own.
 
 ## Requirements
 

@@ -1,5 +1,5 @@
-# Golden frame hashes for the `nebula` preset: sha256 of the RGBA bytes of a
-# 320x180 software-adapter render, seed 1337, synthetic features.
+# Golden frame hashes for the `nebula` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
 # Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
 0 a3ce407659976ced57cc6a8063d795ad713e53ef26ee73a25ee97b8770d859fc
 10 51868e313c6758041e6c92a30ce11b84a3e2cb8c7a6cb278c59eb2f49193a18a

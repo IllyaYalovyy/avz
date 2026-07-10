@@ -40,10 +40,11 @@ use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use avz_core::analysis::FeatureFrame;
-use avz_core::config::Palette;
+use avz_core::config::{self, Palette};
 use avz_core::render::{
-    AdapterChoice, BUILT_INS, Backdrop, Compositor, Globals, Gpu, Layer, LinearPalette, Offscreen,
-    PRESETS, PackedParams, ParamKind, Preset, Visualizer, palette,
+    AdapterChoice, BUILT_INS, Backdrop, Card, CardText, Compositor, Globals, Gpu, Layer,
+    LinearPalette, Offscreen, PRESETS, PackedParams, ParamKind, Preset, TextCard, Visualizer,
+    palette,
 };
 use sha2::{Digest, Sha256};
 
@@ -314,8 +315,8 @@ fn write_golden(path: &PathBuf, header: &str, hashes: &[(String, String)]) {
     fs::create_dir_all(path.parent().expect("tests/golden")).expect("create tests/golden");
 
     let mut text = format!(
-        "# {header}: sha256 of the RGBA bytes of a\n\
-         # {WIDTH}x{HEIGHT} software-adapter render, seed {GOLDEN_SEED}, synthetic features.\n\
+        "# {header}.\n\
+         # sha256 of the RGBA bytes of a {WIDTH}x{HEIGHT} software-adapter render.\n\
          # Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames\n",
     );
     for (key, hash) in hashes {
@@ -359,7 +360,11 @@ fn every_preset_renders_its_golden_frames() {
                 .collect();
             write_golden(
                 &golden_file(preset),
-                &format!("Golden frame hashes for the `{}` preset", preset.name),
+                &format!(
+                    "Golden frame hashes for the `{}` preset, seed {GOLDEN_SEED}, \
+                     synthetic features",
+                    preset.name,
+                ),
                 &text,
             );
             continue;
@@ -425,7 +430,10 @@ fn every_built_in_palette_renders_a_distinct_stable_frame() {
     if updating() {
         write_golden(
             &palette_golden_file(),
-            &format!("Golden hashes of `pulse` frame {PALETTE_FRAME} under every built-in palette"),
+            &format!(
+                "Golden hashes of `pulse` frame {PALETTE_FRAME}, seed {GOLDEN_SEED}, under \
+                 every built-in palette"
+            ),
             &hashes,
         );
         return;
@@ -822,6 +830,183 @@ fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
         white * 4 < total,
         "after 90 frames {white} of {total} pixels are pure white: the trail blew out",
     );
+}
+
+/// The two moments of the card's envelope that are worth pinning: halfway up the
+/// fade, and fully up during the hold.
+///
+/// With the default `[text]` — `in_at = 1.0s`, `fade = 0.6s` — frame 39 is 1.3 s
+/// (the middle of the fade in) and frame 48 is 1.6 s (the first fully opaque
+/// frame). At 30 fps, both are exact.
+const CARD_FRAMES: [usize; 2] = [39, 48];
+
+fn card_golden_file() -> PathBuf {
+    golden_dir().join("text-card.txt")
+}
+
+/// The card as the golden frames set it: large enough that a 320x180 frame
+/// carries readable ink, and words with an ascender, a descender, and a space.
+fn card_config() -> config::Text {
+    config::Text {
+        size: 0.16,
+        ..config::Config::default().text
+    }
+}
+
+fn card_words() -> CardText {
+    CardText {
+        title: Some("Sine Tones".to_owned()),
+        artist: Some("avz test fixture".to_owned()),
+    }
+}
+
+/// The card composited over the palette gradient on `frame_index`, hashed.
+///
+/// No visualizer: the card is what is being pinned, and `pulse` drawing over the
+/// same pixels would hide a card that stopped rendering.
+fn card_hash(frame_index: usize) -> String {
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+
+    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+    let background = Backdrop::default().layer(&gpu, WIDTH, HEIGHT, ember());
+    let layer = Layer::new(&gpu, WIDTH, HEIGHT, "text card");
+    let compositor = Compositor::new(&gpu, &[&background, &layer]).expect("two 320x180 layers");
+
+    let card = Card::prepare(&card_config(), &card_words(), (WIDTH, HEIGHT))
+        .expect("the bundled font reads")
+        .expect("latin words leave ink");
+    let text = TextCard::new(&gpu, &card, ember()).expect("the card's pass builds");
+
+    text.draw(&gpu, &layer, frame_index, FPS);
+    compositor.composite(&gpu, &target);
+
+    hex(&target.read_rgba(&gpu).expect("the frame reads back"))
+}
+
+/// The text card draws the same two frames it drew when its hashes were
+/// committed: the same glyphs, in the same place, at the same two opacities.
+///
+/// This is the only test that would notice a `cosmic-text` upgrade that reshaped
+/// the words, a font swap, a nine-grid anchor that moved, or an envelope whose
+/// midpoint drifted. The unit tests hold the geometry and the envelope to their
+/// arithmetic; only a hash holds the *picture* to what a human once looked at.
+#[test]
+fn the_text_card_renders_its_golden_frames() {
+    let hashes: Vec<(String, String)> = CARD_FRAMES
+        .iter()
+        .map(|&index| (index.to_string(), card_hash(index)))
+        .collect();
+
+    // Checked before the regenerate branch: a card that ignored `frame_index`
+    // would draw one picture twice, and `AVZ_UPDATE_GOLDEN=1` must never bless it.
+    assert_ne!(
+        hashes[0].1, hashes[1].1,
+        "the card renders the middle of its fade and its full opacity alike: \
+         the envelope never reaches a pixel",
+    );
+
+    if updating() {
+        write_golden(
+            &card_golden_file(),
+            "Golden hashes of the text card, set in the bundled font, over the `ember` \
+             gradient",
+            &hashes,
+        );
+        return;
+    }
+
+    assert_eq!(
+        read_golden(&card_golden_file()),
+        hashes,
+        "the text card no longer renders the frames its hashes were committed \
+         from. If the change was intended, regenerate with `AVZ_UPDATE_GOLDEN=1 \
+         cargo test -p avz-core --test golden_frames` and say in the commit \
+         message what moved.",
+    );
+}
+
+/// Before `in_at` there is no card, and the frame is the backdrop alone.
+///
+/// The card layer is always composited when a card exists, so a shader that
+/// ignored the opacity would paint the type over every frame of the song.
+#[test]
+fn the_text_card_is_invisible_before_it_fades_in() {
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+
+    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+    let background = Backdrop::default().layer(&gpu, WIDTH, HEIGHT, ember());
+    let layer = Layer::new(&gpu, WIDTH, HEIGHT, "text card");
+    let compositor = Compositor::new(&gpu, &[&background, &layer]).expect("two 320x180 layers");
+    let bare = Compositor::new(&gpu, &[&background]).expect("one 320x180 layer");
+
+    let card = Card::prepare(&card_config(), &card_words(), (WIDTH, HEIGHT))
+        .expect("the bundled font reads")
+        .expect("latin words leave ink");
+    let text = TextCard::new(&gpu, &card, ember()).expect("the card's pass builds");
+
+    // Frame 0 is `0.0s`, and the default card is asked for at `1.0s`.
+    text.draw(&gpu, &layer, 0, FPS);
+    compositor.composite(&gpu, &target);
+    let before = target.read_rgba(&gpu).expect("the frame reads back");
+
+    bare.composite(&gpu, &target);
+    let backdrop = target.read_rgba(&gpu).expect("the frame reads back");
+
+    assert_eq!(
+        before, backdrop,
+        "the card is drawn a second before it is asked for",
+    );
+}
+
+/// The card, at 960x540, across its whole envelope, in `target/text-card/`.
+///
+/// A hash says the card did not change; it does not say the card is well set.
+/// Leading, margins, and the rise are typography, and typography is looked at:
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_text_card
+/// ```
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual typography pass; asserts nothing"]
+fn dump_text_card_frames() {
+    const WIDE: u32 = 960;
+    const TALL: u32 = 540;
+    /// The whole envelope of the default `[text]`, at 30 fps: before it is asked
+    /// for (`1.0s`), halfway up the fade, the first fully opaque frame (`1.6s`),
+    /// the middle of the hold, halfway down the fade out, and the first frame
+    /// after the card is gone (`8.2s`).
+    const KEPT: [usize; 6] = [25, 39, 48, 120, 237, 246];
+
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/text-card");
+    fs::create_dir_all(&out).expect("create target/text-card");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the typography pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
+    let background = Backdrop::default().layer(&gpu, WIDE, TALL, ember());
+    let layer = Layer::new(&gpu, WIDE, TALL, "text card");
+    let compositor = Compositor::new(&gpu, &[&background, &layer]).expect("two 960x540 layers");
+
+    let card = Card::prepare(&config::Config::default().text, &card_words(), (WIDE, TALL))
+        .expect("the bundled font reads")
+        .expect("latin words leave ink");
+    let text = TextCard::new(&gpu, &card, ember()).expect("the card's pass builds");
+
+    for index in KEPT {
+        text.draw(&gpu, &layer, index, FPS);
+        compositor.composite(&gpu, &target);
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+
+        let path = out.join(format!("{index:03}.png"));
+        image::RgbaImage::from_raw(WIDE, TALL, pixels)
+            .expect("the frame is WIDE x TALL RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
 }
 
 /// The M2 tuning instrument: one PNG per driving feature, in `target/pulse-tuning/`.

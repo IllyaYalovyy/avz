@@ -9,6 +9,7 @@ repository.workspace = true
 authors.workspace = true
 
 [dependencies]
+cosmic-text.workspace = true
 image.workspace = true
 lofty.workspace = true
 pollster.workspace = true
