@@ -8,11 +8,14 @@
 //! touches nothing outside `presets/` (RFC-001 G3). No pipeline, binding, or
 //! compositor code moves (`AGENTS.md`, rendering).
 //!
-//! Beyond the uniform, a preset may ask for one thing: the previous frame, by
-//! declaring `"needs_feedback": true` in its schema. That binds
-//! [`Feedback`](crate::render::Feedback) at `@binding(1)` and its sampler at
-//! `@binding(2)`. The declaration is data, so asking for it is still a change to
-//! `presets/` alone.
+//! Beyond the uniform, a preset may ask for two things (`VISION.md` §6). The
+//! previous frame, by declaring `"needs_feedback": true` in its schema, which
+//! binds [`Feedback`](crate::render::Feedback) at `@binding(1)` and its sampler
+//! at `@binding(2)`. And this frame's coarse spectrum, by declaring
+//! `"needs_spectrum": true`, which binds [`Spectrum`](crate::render::Spectrum) at
+//! `@binding(3)`. Both declarations are data, so asking for either is still a
+//! change to `presets/` alone, and they are independent: a preset may ask for
+//! one, both, or neither.
 //!
 //! The palette that fills `Globals::palette` arrives in RFC-001 Step 16.
 
@@ -21,6 +24,7 @@ use crate::render::globals::{GLOBALS_SIZE, Globals};
 use crate::render::layer::Layer;
 use crate::render::offscreen::{FRAME_FORMAT, Gpu};
 use crate::render::schema::PresetSchema;
+use crate::render::spectrum::Spectrum;
 use crate::{Error, Result};
 
 /// One visualizer: a name, a one-line description, its shader, and its schema.
@@ -95,6 +99,7 @@ pub struct Visualizer {
     uniforms: wgpu::Buffer,
     bindings: wgpu::BindGroup,
     feedback: Option<Feedback>,
+    spectrum: Option<Spectrum>,
 }
 
 impl Visualizer {
@@ -108,16 +113,18 @@ impl Visualizer {
     ///
     /// [`Error::Config`] if the preset's embedded schema does not parse, and
     /// [`Error::Render`] if the shader does not compile or link — including when
-    /// it samples `@binding(1)` without declaring `needs_feedback`. The presets
-    /// are embedded, so both are bugs rather than bad user input, but a message
-    /// beats a panic on a driver that rejects what naga accepted.
+    /// it samples `@binding(1)` without declaring `needs_feedback`, or
+    /// `@binding(3)` without declaring `needs_spectrum`. The presets are
+    /// embedded, so both are bugs rather than bad user input, but a message beats
+    /// a panic on a driver that rejects what naga accepted.
     pub fn new(gpu: &Gpu, preset: &Preset, target: &Layer) -> Result<Self> {
         let device = gpu.device();
 
-        let feedback = preset
-            .schema()?
+        let schema = preset.schema()?;
+        let feedback = schema
             .needs_feedback
             .then(|| Feedback::new(gpu, target.width(), target.height()));
+        let spectrum = schema.needs_spectrum.then(|| Spectrum::new(gpu));
 
         let errors = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
@@ -141,6 +148,9 @@ impl Visualizer {
         if feedback.is_some() {
             layout_entries.extend(Feedback::layout_entries());
         }
+        if spectrum.is_some() {
+            layout_entries.extend(Spectrum::layout_entries());
+        }
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("avz globals"),
@@ -160,6 +170,9 @@ impl Visualizer {
         }];
         if let Some(feedback) = &feedback {
             entries.extend(feedback.bindings());
+        }
+        if let Some(spectrum) = &spectrum {
+            entries.extend(spectrum.bindings());
         }
 
         let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -213,6 +226,7 @@ impl Visualizer {
             uniforms,
             bindings,
             feedback,
+            spectrum,
         })
     }
 
@@ -227,9 +241,23 @@ impl Visualizer {
     /// A feedback preset samples the frame drawn by the previous call — black on
     /// the first — and this call's frame becomes the next one's history. Frames
     /// must therefore be drawn in order, which is what `pipeline::render` does.
-    pub fn draw(&self, gpu: &Gpu, target: &Layer, globals: &Globals) {
+    ///
+    /// `spectrum` is this frame's coarse spectrum, from
+    /// [`FeatureTimeline::spectrum`](crate::analysis::FeatureTimeline::spectrum).
+    /// A preset whose schema does not declare `needs_spectrum` never reads it, so
+    /// a caller with none — a test drawing a preset it wrote itself — may pass an
+    /// empty slice.
+    ///
+    /// # Panics
+    ///
+    /// If the preset declares `needs_spectrum` and `spectrum` is not
+    /// [`SPECTRUM_BINS`](crate::analysis::SPECTRUM_BINS) long.
+    pub fn draw(&self, gpu: &Gpu, target: &Layer, globals: &Globals, spectrum: &[f32]) {
         gpu.queue()
             .write_buffer(&self.uniforms, 0, &globals.to_bytes());
+        if let Some(texture) = &self.spectrum {
+            texture.upload(gpu, spectrum);
+        }
 
         let mut encoder = gpu
             .device()
@@ -400,6 +428,33 @@ mod tests {
                  previous-frame binding",
                 preset.name,
                 schema.needs_feedback,
+                if samples {
+                    "declares"
+                } else {
+                    "does not declare"
+                },
+            );
+        }
+    }
+
+    /// The same two-halves-of-one-decision problem as `needs_feedback`, for the
+    /// spectrum texture. A schema that asks for it while its shader never reads
+    /// it pays for a texture upload on every frame of every render and shows
+    /// nothing for it; a shader that reads it without asking fails to build
+    /// (`a_preset_that_does_not_ask_for_the_spectrum_gets_no_binding`).
+    #[test]
+    fn a_preset_asks_for_the_spectrum_texture_exactly_when_its_shader_samples_it() {
+        for preset in PRESETS {
+            let schema = preset.schema().expect("a shipped schema parses");
+            let samples = preset.source.contains("@group(0) @binding(3)");
+
+            assert_eq!(
+                schema.needs_spectrum,
+                samples,
+                "preset `{}` declares `needs_spectrum: {}` but its WGSL {} the \
+                 spectrum binding",
+                preset.name,
+                schema.needs_spectrum,
                 if samples {
                     "declares"
                 } else {

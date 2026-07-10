@@ -14,8 +14,11 @@ use rayon::prelude::*;
 use crate::analysis::DecodedAudio;
 use crate::analysis::envelope::{self, EnvelopeParams};
 use crate::analysis::onset::{self, OnsetParams};
-use crate::analysis::spectrum::{self, Spectrograph};
+use crate::analysis::spectrum::{self, SPECTRUM_BINS, Spectrograph};
 use crate::{Error, Result};
+
+/// What [`FeatureTimeline::spectrum`] hands back for a frame that does not exist.
+const SILENT_SPECTRUM: [f32; SPECTRUM_BINS] = [0.0; SPECTRUM_BINS];
 
 /// Nominal analysis window: 2048 samples ≈ 46 ms at 44.1 kHz (`VISION.md` §5.1).
 ///
@@ -79,6 +82,16 @@ pub struct FeatureTimeline {
     pub fps: u32,
     /// Frame `i` describes the audio around timestamp `i / fps`.
     pub frames: Vec<FeatureFrame>,
+    /// The coarse spectrum of every frame, [`SPECTRUM_BINS`] buckets each, laid
+    /// end to end (`VISION.md` §5.1, "Output").
+    ///
+    /// Read one frame at a time through [`FeatureTimeline::spectrum`]. Flat
+    /// rather than a `Vec<Vec<f32>>` because the renderer uploads one row per
+    /// frame into a `512×1` texture and wants a contiguous slice to hand wgpu.
+    ///
+    /// A five-minute song at 30 fps is 18 MB of this, which is why the *full*
+    /// magnitude spectra it is averaged down from never leave [`analyze_with`].
+    pub spectra: Vec<f32>,
 }
 
 impl FeatureTimeline {
@@ -116,6 +129,22 @@ impl FeatureTimeline {
             Some(&last) => *self.frames.get(frame_index).unwrap_or(&last),
             None => FeatureFrame::default(),
         }
+    }
+
+    /// The coarse spectrum of frame `frame_index`, clamped to the last frame.
+    ///
+    /// Always [`SPECTRUM_BINS`] long, so a caller can hand it straight to the
+    /// renderer without checking. A timeline with no frames — which only
+    /// [`analyze_with`]'s callers can build, and only by hand — reads silent
+    /// rather than panicking, for the same reason [`Self::frame`] clamps.
+    pub fn spectrum(&self, frame_index: usize) -> &[f32] {
+        let frames = self.spectra.len() / SPECTRUM_BINS;
+        let Some(last) = frames.checked_sub(1) else {
+            return &SILENT_SPECTRUM;
+        };
+
+        let row = frame_index.min(last) * SPECTRUM_BINS;
+        &self.spectra[row..row + SPECTRUM_BINS]
     }
 
     /// The features `ahead` frames after `frame_index`, clamped to the last
@@ -173,6 +202,13 @@ pub fn analyze_with(
 ) -> Result<FeatureTimeline> {
     let mut timeline = raw_timeline(audio, fps)?;
     rescale_and_smooth(&mut timeline.frames, fps, envelope);
+    // The whole spectrogram is rescaled as one track rather than bucket by
+    // bucket: a bucket normalized against its own range would stretch the noise
+    // floor of an empty 15 kHz bucket to full scale, and the ribbon would read
+    // hiss as loud as a kick. One p5..p95 over every bucket of every frame keeps
+    // the shape of the spectrum — the bass end really is louder — and clamps the
+    // loudest twentieth of it, exactly as `bass` is already clamped.
+    envelope::normalize(&mut timeline.spectra);
 
     Ok(timeline)
 }
@@ -239,12 +275,22 @@ fn raw_timeline(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
         )
         .unzip();
 
-    // Frame 0 has nothing to differ from and keeps its 0.0. The spectra live no
-    // longer than this pass — a five-minute song at 30 fps is about 37 MB of
-    // them — which is why they are not part of the timeline.
+    // Frame 0 has nothing to differ from and keeps its 0.0. The full spectra live
+    // no longer than this pass — a five-minute song at 30 fps is about 37 MB of
+    // them — which is why the timeline carries the coarse average below instead.
     for (index, pair) in spectra.windows(2).enumerate() {
         frames[index + 1].flux = spectrum::spectral_flux(&pair[0], &pair[1]);
     }
+
+    // The 512-bucket rows a preset samples as a texture. Averaged here, from the
+    // spectra the flux pass already needed, rather than recomputed from the
+    // audio. `par_iter` is indexed, so the rows land in frame order whatever
+    // order the threads finish in (`AGENTS.md`, determinism).
+    let spectrogram: Vec<f32> = spectra
+        .par_iter()
+        .map(|magnitudes| spectrum::coarse_spectrum(magnitudes, bin_hz))
+        .collect::<Vec<_>>()
+        .concat();
 
     // Onsets threshold each frame's flux against a second of its neighbours, so
     // they need the whole flux track — which the two-pass design already has.
@@ -262,7 +308,11 @@ fn raw_timeline(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
         "built feature timeline"
     );
 
-    Ok(FeatureTimeline { fps, frames })
+    Ok(FeatureTimeline {
+        fps,
+        frames,
+        spectra: spectrogram,
+    })
 }
 
 /// Reads one feature off a frame.
@@ -1235,6 +1285,95 @@ mod tests {
         assert_eq!(timeline.timestamp(0), Duration::ZERO);
         assert_eq!(timeline.timestamp(30), Duration::from_secs(1));
         assert_eq!(timeline.duration(), Duration::from_secs(2));
+    }
+
+    /// The coarse spectrum the renderer uploads as a texture, one row per video
+    /// frame (`VISION.md` §5.1, "Output"). A short read would walk a preset off
+    /// the end of its own texture.
+    #[test]
+    fn every_video_frame_carries_a_512_bucket_spectrum() {
+        let timeline = analyze(&audio(sine(1_000.0, 0.9, 2.0, RATE), RATE), 30).expect("analyzes");
+
+        assert_eq!(timeline.spectra.len(), timeline.len() * SPECTRUM_BINS);
+        for index in 0..timeline.len() {
+            assert_eq!(timeline.spectrum(index).len(), SPECTRUM_BINS);
+        }
+    }
+
+    /// The whole point of the texture: a preset reads the shape of the song's
+    /// spectrum, not just its five bands. A 60 Hz kick must be hot at the bass
+    /// end of the row and cold at the top of it.
+    #[test]
+    fn the_spectrum_of_a_bass_tone_is_hot_at_the_bottom_and_cold_at_the_top() {
+        let timeline = analyze(&audio(sine(60.0, 0.9, 2.0, RATE), RATE), 30).expect("analyzes");
+        let row = timeline.spectrum(timeline.len() / 2);
+
+        let bucket_of = |hz: f32| {
+            let (low, high) = crate::analysis::SPECTRUM_RANGE_HZ;
+            let fraction = (hz / low).ln() / (high / low).ln();
+            (fraction * SPECTRUM_BINS as f32) as usize
+        };
+
+        assert!(
+            row[bucket_of(60.0)] > 0.5,
+            "60 Hz reads {} on a 60 Hz tone",
+            row[bucket_of(60.0)],
+        );
+        for quiet in [1_000.0f32, 8_000.0] {
+            assert!(
+                row[bucket_of(quiet)] < 0.1,
+                "{quiet} Hz reads {} on a 60 Hz tone",
+                row[bucket_of(quiet)],
+            );
+        }
+    }
+
+    /// Every value the texture carries is a unit-interval float, like every
+    /// other feature: the global p5/p95 pass runs over the whole spectrogram.
+    #[test]
+    fn the_spectrum_is_normalized_into_the_unit_interval() {
+        let mut samples = sine(60.0, 0.9, 1.0, RATE);
+        samples.extend(sine(3_000.0, 0.2, 1.0, RATE));
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+
+        assert!(
+            timeline
+                .spectra
+                .iter()
+                .all(|&v| v.is_finite() && (0.0..=1.0).contains(&v)),
+        );
+        assert!(
+            timeline.spectra.iter().any(|&v| v > 0.9),
+            "nothing reaches the top of the range, so the normalization did not run",
+        );
+    }
+
+    /// A silent song has no spectral shape, and dividing by its zero spread would
+    /// put a `NaN` in a texture and paint every ribbon black.
+    #[test]
+    fn a_silent_song_has_a_zero_spectrum_and_no_nans() {
+        let timeline = analyze(&audio(silence(1.0, RATE), RATE), 30).expect("silence analyzes");
+
+        assert_eq!(timeline.spectra.len(), timeline.len() * SPECTRUM_BINS);
+        assert!(timeline.spectra.iter().all(|&value| value == 0.0));
+    }
+
+    /// Like [`FeatureTimeline::frame`], a read past the end clamps rather than
+    /// panics — and a timeline with no frames at all hands back silence.
+    #[test]
+    fn a_spectrum_lookup_past_the_end_clamps_to_the_last_frame() {
+        let timeline = analyze(&audio(vec![0.5; RATE as usize], RATE), 30).expect("analyzes");
+
+        let last = timeline.spectrum(timeline.len() - 1).to_vec();
+        assert_eq!(timeline.spectrum(timeline.len()), last);
+        assert_eq!(timeline.spectrum(usize::MAX), last);
+
+        let empty = FeatureTimeline {
+            fps: 30,
+            frames: Vec::new(),
+            spectra: Vec::new(),
+        };
+        assert_eq!(empty.spectrum(0), [0.0; SPECTRUM_BINS]);
     }
 
     /// A caller whose frame count rounds the other way must see the last frame,

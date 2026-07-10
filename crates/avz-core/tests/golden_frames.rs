@@ -39,7 +39,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use avz_core::analysis::FeatureFrame;
+use avz_core::analysis::{FeatureFrame, SPECTRUM_BINS};
 use avz_core::config::{self, Palette};
 use avz_core::render::{
     AdapterChoice, BUILT_INS, Backdrop, Card, CardText, Compositor, Globals, Gpu, Layer,
@@ -153,6 +153,39 @@ fn synthetic_frame(frame_index: usize) -> FeatureFrame {
     }
 }
 
+/// The coarse spectrum of golden frame `frame_index`, built by hand.
+///
+/// Written down rather than analyzed, for the reason [`synthetic_frame`] is: the
+/// point of a golden frame is that its input lives in this file, so a change in
+/// the DSP cannot silently rewrite the picture a preset is held to.
+///
+/// The shape is a bass hump under a harmonic comb and a formant that walks with
+/// the frame — spectral structure at three scales, so a preset that averages
+/// buckets together, reads them at the wrong offset, or ignores them entirely
+/// renders a different frame. Its overall level follows the frame's `rms_env`,
+/// so the silent golden frame has a silent spectrum too.
+fn synthetic_spectrum(frame_index: usize) -> Vec<f32> {
+    let level = synthetic_frame(frame_index).rms_env;
+    let walk = (frame_index % 20) as f32 / 20.0;
+
+    (0..SPECTRUM_BINS)
+        .map(|bucket| {
+            let x = bucket as f32 / (SPECTRUM_BINS - 1) as f32;
+            let hump = (-(x / 0.18).powi(2)).exp();
+            let formant = (-(((x - (0.35 + 0.25 * walk)) / 0.06).powi(2))).exp();
+            let comb = 0.5 + 0.5 * (std::f32::consts::TAU * x * 40.0).cos();
+            let tilt = 1.0 - 0.8 * x;
+
+            (level * (0.7 * hump + 0.5 * formant) * tilt * (0.55 + 0.45 * comb)).clamp(0.0, 1.0)
+        })
+        .collect()
+}
+
+/// A spectrum with no energy in it, for the frames drawn from silent features.
+fn silent_spectrum() -> Vec<f32> {
+    vec![0.0; SPECTRUM_BINS]
+}
+
 /// A preset's parameters at the defaults its schema declares.
 ///
 /// The golden hashes are hashes of a *default* render, which is what makes
@@ -172,6 +205,14 @@ fn needs_feedback(preset: &Preset) -> bool {
         .schema()
         .expect("the shipped schema parses")
         .needs_feedback
+}
+
+/// Whether `preset` samples the frame's coarse spectrum.
+fn needs_spectrum(preset: &Preset) -> bool {
+    preset
+        .schema()
+        .expect("the shipped schema parses")
+        .needs_spectrum
 }
 
 /// The layer stack of one render: a backdrop, a visualizer layer over it, and the
@@ -205,8 +246,8 @@ impl Stage {
         }
     }
 
-    fn draw(&self, gpu: &Gpu, globals: &Globals) {
-        self.visualizer.draw(gpu, &self.visual, globals);
+    fn draw(&self, gpu: &Gpu, globals: &Globals, spectrum: &[f32]) {
+        self.visualizer.draw(gpu, &self.visual, globals, spectrum);
     }
 
     /// Composite the stack and read the frame back, tightly packed.
@@ -271,7 +312,7 @@ fn render_hash_on(
             colors,
             params,
         );
-        stage.draw(&gpu, &globals);
+        stage.draw(&gpu, &globals, &synthetic_spectrum(index));
     }
     let pixels = stage.read(&gpu);
 
@@ -670,7 +711,7 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
             ember(),
             params,
         );
-        stage.draw(&gpu, &globals);
+        stage.draw(&gpu, &globals, &synthetic_spectrum(10));
         hex(&stage.read(&gpu))
     };
 
@@ -722,7 +763,7 @@ fn every_preset_draws_a_layer_the_backdrop_shows_through() {
             ember(),
             defaults(preset),
         );
-        stage.draw(&gpu, &globals);
+        stage.draw(&gpu, &globals, &silent_spectrum());
         let pixels = stage.read(&gpu);
 
         let opaque = pixels.chunks_exact(4).filter(|px| px[3] == 255).count();
@@ -770,7 +811,7 @@ fn nebula_frames_depend_on_the_frames_before_them() {
             ember(),
             defaults(nebula),
         );
-        stage.draw(&gpu, &globals);
+        stage.draw(&gpu, &globals, &synthetic_spectrum(FRAME));
         hex(&stage.read(&gpu))
     };
 
@@ -808,7 +849,7 @@ fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
             ember(),
             defaults(nebula),
         );
-        stage.draw(&gpu, &globals);
+        stage.draw(&gpu, &globals, &synthetic_spectrum(index));
     }
     let pixels = stage.read(&gpu);
 
@@ -829,6 +870,125 @@ fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
     assert!(
         white * 4 < total,
         "after 90 frames {white} of {total} pixels are pure white: the trail blew out",
+    );
+}
+
+/// A spectrum with `buckets` at full scale and everything else silent.
+fn hot(buckets: std::ops::Range<usize>) -> Vec<f32> {
+    let mut spectrum = silent_spectrum();
+    spectrum[buckets].fill(1.0);
+    spectrum
+}
+
+/// One frame of `ribbons` over no backdrop, drawn from a loud frame's features
+/// and the spectrum given. What comes back is the preset's own light.
+fn ribbon_light(spectrum: &[f32]) -> Vec<u8> {
+    const FRAME: usize = 100;
+
+    let ribbons = Preset::by_name("ribbons").expect("ribbons ships");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, ribbons, ember(), None);
+    let globals = Globals::for_frame(
+        FRAME,
+        FPS,
+        (WIDTH, HEIGHT),
+        GOLDEN_SEED,
+        synthetic_frame(FRAME),
+        ember(),
+        defaults(ribbons),
+    );
+    stage.draw(&gpu, &globals, spectrum);
+
+    stage.read(&gpu)
+}
+
+/// How many pixels of the left and right thirds of `frame` carry any light.
+fn lit_thirds(frame: &[u8]) -> (usize, usize) {
+    let third = WIDTH as usize / 3;
+    let mut left = 0;
+    let mut right = 0;
+
+    for (index, pixel) in frame.chunks_exact(4).enumerate() {
+        if pixel[..3] == [0, 0, 0] {
+            continue;
+        }
+        match index % WIDTH as usize {
+            column if column < third => left += 1,
+            column if column >= WIDTH as usize - third => right += 1,
+            _ => {}
+        }
+    }
+
+    (left, right)
+}
+
+/// `ribbons` reads the spectrum texture, and reads it *positionally*: the width
+/// of the frame is the frequency axis.
+///
+/// The plumbing is proven in `spectrum_texture.rs` against a shader that does
+/// nothing else. This proves the shipped preset is wired to it, and wired the
+/// right way round. Nothing else in this file would notice a `ribbons` that
+/// dropped its `textureLoad` and drew flat lines — its golden hashes would
+/// simply be blessed without the spectrum in them.
+#[test]
+fn ribbons_draws_its_light_where_the_spectrum_has_energy() {
+    let ribbons = Preset::by_name("ribbons").expect("ribbons ships");
+    assert!(needs_spectrum(ribbons), "ribbons asks for the spectrum");
+
+    let quarter = SPECTRUM_BINS / 4;
+    let (bass_left, bass_right) = lit_thirds(&ribbon_light(&hot(0..quarter)));
+    let (air_left, air_right) = lit_thirds(&ribbon_light(&hot(3 * quarter..SPECTRUM_BINS)));
+
+    assert!(
+        bass_left > 10 * bass_right.max(1),
+        "energy in the lowest buckets lit {bass_left} pixels on the left and \
+         {bass_right} on the right: the frequency axis is not the frame's width",
+    );
+    assert!(
+        air_right > 10 * air_left.max(1),
+        "energy in the highest buckets lit {air_left} pixels on the left and \
+         {air_right} on the right: the frequency axis runs backwards",
+    );
+}
+
+/// A silent spectrum under a loud frame draws nothing. The ribbon *is* the
+/// spectrum: a preset that drew its lanes whatever the texture said would have
+/// passed every hash above, and would ignore the music.
+#[test]
+fn ribbons_draws_nothing_where_the_spectrum_is_silent() {
+    let frame = ribbon_light(&silent_spectrum());
+
+    assert!(
+        frame.chunks_exact(4).all(|pixel| pixel[..3] == [0, 0, 0]),
+        "ribbons drew light from a spectrum with no energy in it",
+    );
+}
+
+/// `--sample 3s --adapter software` must produce stable, non-black, evolving
+/// output, as for `nebula`: that the frame is *lit* without blowing out.
+#[test]
+fn ribbons_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
+    let frame = ribbon_light(&synthetic_spectrum(100));
+
+    let lit = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] != [0, 0, 0])
+        .count();
+    let white = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] == [255, 255, 255])
+        .count();
+    let total = (WIDTH * HEIGHT) as usize;
+
+    assert!(
+        lit * 10 > total,
+        "only {lit} of {total} pixels are lit: ribbons renders black",
+    );
+    assert!(
+        white * 4 < total,
+        "{white} of {total} pixels are pure white: the ribbons blew out",
     );
 }
 
@@ -1081,7 +1241,7 @@ fn dump_pulse_tuning_frames() {
             ember(),
             params,
         );
-        stage.draw(&gpu, &globals);
+        stage.draw(&gpu, &globals, &synthetic_spectrum(10));
         let pixels = stage.read(&gpu);
 
         let path = out.join(format!("{name}.png"));
@@ -1147,11 +1307,65 @@ fn dump_nebula_tuning_frames() {
             ember(),
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals);
+        visualizer.draw(&gpu, &visual, &globals, &synthetic_spectrum(index));
 
         if !KEPT.contains(&index) {
             continue;
         }
+        compositor.composite(&gpu, &target);
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+        let path = out.join(format!("{index:03}.png"));
+        image::RgbaImage::from_raw(WIDE, TALL, pixels)
+            .expect("the frame is WIDE x TALL RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+}
+
+/// The same instrument for `ribbons`, in `target/ribbons-tuning/`.
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_ribbons
+/// ```
+///
+/// A hash says the ribbons did not change; it does not say they read as ribbons.
+/// The spectrum is a moving formant over a bass hump — a voice over a kick — so
+/// what the frames show is whether the stack tracks the music across the
+/// frequency axis rather than merely wobbling.
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual tuning pass; asserts nothing"]
+fn dump_ribbons_tuning_frames() {
+    const WIDE: u32 = 960;
+    const TALL: u32 = 540;
+    const KEPT: [usize; 5] = [0, 10, 25, 60, 100];
+
+    let preset = Preset::by_name("ribbons").expect("ribbons ships");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ribbons-tuning");
+    fs::create_dir_all(&out).expect("create target/ribbons-tuning");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
+    let background = Backdrop::default().layer(&gpu, WIDE, TALL, ember());
+    let visual = Layer::new(&gpu, WIDE, TALL, "visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual).expect("ribbons compiles");
+    let compositor = Compositor::new(&gpu, &[&background, &visual]).expect("two 960x540 layers");
+
+    let params = defaults(preset);
+    for index in KEPT {
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDE, TALL),
+            GOLDEN_SEED,
+            synthetic_frame(index),
+            ember(),
+            params,
+        );
+        visualizer.draw(&gpu, &visual, &globals, &synthetic_spectrum(index));
+
         compositor.composite(&gpu, &target);
         let pixels = target.read_rgba(&gpu).expect("the frame reads back");
         let path = out.join(format!("{index:03}.png"));

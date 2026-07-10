@@ -8,6 +8,24 @@ to the envelope defaults, or to normalization gives an unchanged input and confi
 a different video. Those changes are called out under **Breaking changes** even
 when no API moved, because a config checked into an album repo is an API.
 
+## [Unreleased]
+
+### Added
+
+- **`ribbons` preset.** A stack of ribbons across the frame, each displaced,
+  thickened, and lit by the song's own spectrum: the width of the frame is the
+  log-frequency axis, bass at the left edge and air at the right. The first
+  preset deferred by RFC-001 NG1 to land.
+- **Spectrum texture binding.** Analysis now emits a coarse 512-bucket,
+  log-spaced spectrum per video frame (`VISION.md` §5.1), normalized over the
+  whole song like every other feature. A preset opts in with
+  `"needs_spectrum": true` in its schema and reads the frame's row as a `512×1`
+  `R32Float` texture at `@binding(3)`, with `textureLoad` and no sampler — a
+  float sampler is a wgpu feature lavapipe does not always carry, and hardware
+  filtering rounds differently per driver. Generic, not `ribbons`-specific, and
+  independent of `needs_feedback`: a preset may ask for either, both, or
+  neither. This is the last generic binding RFC-001 planned.
+
 ## [0.1.0] - unreleased
 
 The first usable release. `avz render song.mp3` decodes an mp3, extracts its

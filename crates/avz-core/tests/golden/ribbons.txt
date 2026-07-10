@@ -1,0 +1,6 @@
+# Golden frame hashes for the `ribbons` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 73e4179360ed426f96a85fe0a29c23c7287d7963c25453cdc8af6e021034349a
+10 5949b2714e49068b3d8552aa882ef84d66f4569d3ff594e2b25501f1063a89b9
+100 158abb017003cbed41a62bdd2f170083826d042875faab54a982d324aee6026c

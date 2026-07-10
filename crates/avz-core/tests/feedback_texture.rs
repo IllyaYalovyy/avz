@@ -1,9 +1,9 @@
-//! The previous-frame texture: the one binding a preset may opt into.
+//! The previous-frame texture: one of the two bindings a preset may opt into.
 //!
-//! Feedback is "the workhorse of good abstract visuals" (`VISION.md` §6), and it
-//! is the only thing a preset can ask the renderer for beyond the uniform. A
+//! Feedback is "the workhorse of good abstract visuals" (`VISION.md` §6). A
 //! preset opts in with `"needs_feedback": true` in its schema; the renderer then
-//! binds last frame's pixels at `@binding(1)` and a sampler at `@binding(2)`.
+//! binds last frame's pixels at `@binding(1)` and a sampler at `@binding(2)`. The
+//! other binding, the spectrum texture, is covered by `spectrum_texture.rs`.
 //!
 //! The presets below are built here rather than shipped, because the properties
 //! under test — frame 0 is black, frame N sees frame N-1, and a preset that did
@@ -141,7 +141,7 @@ fn render_sequence(preset: &Preset, frames: usize) -> Vec<u8> {
             colors,
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals);
+        visualizer.draw(&gpu, &visual, &globals, &[]);
     }
     compositor.composite(&gpu, &target);
 

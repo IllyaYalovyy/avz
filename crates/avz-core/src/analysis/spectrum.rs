@@ -28,6 +28,19 @@ pub const BAND_EDGES: [(f32, f32); BAND_COUNT] = [
 /// How many bands [`band_energies`] returns.
 pub const BAND_COUNT: usize = 5;
 
+/// Buckets in the coarse spectrum [`coarse_spectrum`] averages a window into.
+///
+/// `VISION.md` §5.1 asks analysis for "a coarse 512-bin averaged spectrum per
+/// frame for presets that want a full spectrum texture", and §6 binds it as the
+/// 512×1 texture `ribbons` reads.
+pub const SPECTRUM_BINS: usize = 512;
+
+/// The frequency range the coarse spectrum spans, as a half-open `[low, high)`.
+///
+/// The same 20 Hz..16 kHz the five bands cover, for the same reason: below it is
+/// rumble and DC, above it is content the preset has nothing to say about.
+pub const SPECTRUM_RANGE_HZ: (f32, f32) = (BAND_EDGES[0].0, BAND_EDGES[BAND_COUNT - 1].1);
+
 /// The width of one FFT bin, in Hz. Bin `k` is centered on `k * bin_hz`.
 pub fn bin_hz(sample_rate: u32, size: usize) -> f32 {
     if size == 0 {
@@ -155,6 +168,69 @@ pub fn band_energies(magnitudes: &[f32], bin_hz: f32) -> [f32; BAND_COUNT] {
     }
 
     power.map(|sum| sum.ln_1p() as f32)
+}
+
+/// The coarse spectrum of one window: [`SPECTRUM_BINS`] log-spaced buckets of
+/// compressed power, in ascending frequency.
+///
+/// Each bucket averages the power of the FFT bins whose center frequency falls
+/// inside it, then compresses that average with `ln(1 + power)` — the same
+/// compression [`band_energies`] applies, so a bucket and a band read the same
+/// material the same way. Averaging rather than summing keeps a wide treble
+/// bucket from towering over a narrow bass one purely because it holds more
+/// bins.
+///
+/// **Log-spaced**, across [`SPECTRUM_RANGE_HZ`]. A linear spacing would spend
+/// nine tenths of the texture on 2–16 kHz, where a song has almost nothing to
+/// show, and squeeze the whole kick into two texels. Buckets below roughly
+/// 200 Hz are narrower than one FFT bin at a 2048-sample window and read the bin
+/// nearest their center instead of averaging none at all.
+///
+/// Values are raw, like every other feature leaving this module: the global
+/// p5/p95 normalization that maps them into `0.0..=1.0` is a later pass over the
+/// whole song ([`super::features::analyze_with`]).
+pub fn coarse_spectrum(magnitudes: &[f32], bin_hz: f32) -> Vec<f32> {
+    let mut buckets = vec![0.0f32; SPECTRUM_BINS];
+    if magnitudes.is_empty() || bin_hz <= 0.0 {
+        return buckets;
+    }
+
+    let power = |bin: usize| {
+        let magnitude = f64::from(magnitudes[bin]);
+        magnitude * magnitude
+    };
+
+    for (index, bucket) in buckets.iter_mut().enumerate() {
+        let low = bucket_edge(index);
+        let high = bucket_edge(index + 1);
+
+        // Bins `k` with `low <= k * bin_hz < high`, clamped to the spectrum.
+        let first = (low / bin_hz).ceil().max(0.0) as usize;
+        let end = ((high / bin_hz).ceil().max(0.0) as usize).min(magnitudes.len());
+
+        let mean = if first < end {
+            (first..end).map(power).sum::<f64>() / (end - first) as f64
+        } else {
+            // Narrower than one bin: the nearest bin to the bucket's center,
+            // which on a log axis is the geometric mean of its edges.
+            let nearest = ((low * high).sqrt() / bin_hz).round().max(0.0) as usize;
+            power(nearest.min(magnitudes.len() - 1))
+        };
+
+        *bucket = mean.ln_1p() as f32;
+    }
+
+    buckets
+}
+
+/// The lower frequency edge of coarse bucket `index`, in Hz.
+///
+/// Geometric: `low · (high / low)^(index / SPECTRUM_BINS)`, so `bucket_edge(0)`
+/// and `bucket_edge(SPECTRUM_BINS)` are the ends of [`SPECTRUM_RANGE_HZ`] and
+/// every bucket spans the same *ratio* of frequencies.
+fn bucket_edge(index: usize) -> f32 {
+    let (low, high) = SPECTRUM_RANGE_HZ;
+    low * (high / low).powf(index as f32 / SPECTRUM_BINS as f32)
 }
 
 /// The band containing `frequency`, or `None` below 20 Hz or above 16 kHz.
@@ -363,6 +439,155 @@ mod tests {
         let expected = (200.0 * hz) / nyquist;
 
         assert!((spectral_centroid(&magnitudes, hz) - expected).abs() < 1e-6);
+    }
+
+    /// The coarse spectrum a preset samples as a texture is 512 buckets wide,
+    /// whatever the FFT behind it happens to be.
+    #[test]
+    fn the_coarse_spectrum_is_always_512_buckets_wide() {
+        let hz = bin_hz(RATE, SIZE);
+
+        assert_eq!(
+            coarse_spectrum(&magnitudes_of(&windowed_sine(440.0, 0.5)), hz).len(),
+            SPECTRUM_BINS
+        );
+        assert_eq!(
+            coarse_spectrum(&[1.0], bin_hz(RATE, 1)).len(),
+            SPECTRUM_BINS
+        );
+        assert_eq!(coarse_spectrum(&[], 0.0).len(), SPECTRUM_BINS);
+    }
+
+    /// The canonical spectrum-texture test (`docs/TESTING.md` risk matrix): a
+    /// tone lights the bucket that holds its frequency, and the rest of the
+    /// spectrum stays dark. A bucketing that dropped a factor of two — or spaced
+    /// the buckets linearly after promising log spacing — puts the peak
+    /// somewhere else entirely.
+    ///
+    /// The peak is placed to within one FFT bin rather than one bucket, because
+    /// a bucket at 1 kHz is 7 Hz wide and an FFT bin is 22: a tone between two
+    /// bins is split between them, and the buckets that read them tie. That
+    /// resolution limit is the window's, not the bucketing's.
+    #[test]
+    fn a_tone_lights_the_coarse_bucket_that_holds_its_frequency() {
+        for rate in [44_100u32, 48_000] {
+            let hz = bin_hz(rate, SIZE);
+            let samples: Vec<f32> = (0..SIZE)
+                .map(|n| (TAU * 1_000.0 * n as f32 / rate as f32).sin())
+                .collect();
+
+            let coarse = coarse_spectrum(&magnitudes_of(&samples), hz);
+            let peak = coarse
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .map(|(bucket, _)| bucket)
+                .expect("512 buckets exist");
+
+            let peak_hz = (bucket_edge(peak) * bucket_edge(peak + 1)).sqrt();
+            assert!(
+                (peak_hz - 1_000.0).abs() <= hz,
+                "at {rate} Hz the 1 kHz tone peaks in bucket {peak}, centered on {peak_hz} Hz",
+            );
+
+            // And nowhere near the tone, the ribbon is dark: a bucket an octave
+            // below and one two octaves above carry a thousandth of the peak.
+            for elsewhere in [500.0f32, 4_000.0] {
+                let bucket = (0..SPECTRUM_BINS)
+                    .find(|&b| (bucket_edge(b)..bucket_edge(b + 1)).contains(&elsewhere))
+                    .expect("both frequencies are inside the coarse range");
+                assert!(
+                    coarse[bucket] < coarse[peak] * 1e-3,
+                    "at {rate} Hz, {elsewhere} Hz reads {} against a peak of {}",
+                    coarse[bucket],
+                    coarse[peak],
+                );
+            }
+        }
+    }
+
+    /// Log spacing, not linear: the bass gets as many buckets as the treble, so a
+    /// kick occupies a real fraction of the ribbon rather than one texel of it.
+    #[test]
+    fn the_buckets_are_log_spaced_across_the_declared_range() {
+        let (low, high) = SPECTRUM_RANGE_HZ;
+
+        assert!((bucket_edge(0) - low).abs() < 1e-3);
+        assert!((bucket_edge(SPECTRUM_BINS) - high).abs() < 1.0);
+
+        // Half the buckets sit below the geometric mean of the range, which is
+        // 566 Hz — a linear spacing would put them all below 8 kHz instead.
+        let middle = bucket_edge(SPECTRUM_BINS / 2);
+        assert!(
+            (middle - (low * high).sqrt()).abs() < 1.0,
+            "the middle bucket starts at {middle} Hz",
+        );
+
+        // And every edge climbs.
+        for bucket in 0..SPECTRUM_BINS {
+            assert!(bucket_edge(bucket) < bucket_edge(bucket + 1));
+        }
+    }
+
+    /// A bucket narrower than one FFT bin — every bucket under ~200 Hz at a
+    /// 2048-sample window — must read the bin nearest it rather than report
+    /// silence. Otherwise the bass end of the ribbon is a comb of empty texels.
+    #[test]
+    fn a_bucket_narrower_than_one_fft_bin_reads_the_bin_nearest_it() {
+        let hz = bin_hz(RATE, SIZE);
+        let mut magnitudes = vec![0.0f32; SIZE / 2 + 1];
+        // Bin 3 is ~64.6 Hz, inside the bass band and far narrower than a bucket.
+        magnitudes[3] = 1.0;
+
+        let coarse = coarse_spectrum(&magnitudes, hz);
+        let bass: Vec<f32> = (0..SPECTRUM_BINS)
+            .filter(|&bucket| (bucket_edge(bucket)..bucket_edge(bucket + 1)).contains(&64.6))
+            .map(|bucket| coarse[bucket])
+            .collect();
+
+        assert_eq!(bass.len(), 1, "64.6 Hz belongs to exactly one bucket");
+        assert!(bass[0] > 0.0, "the bucket holding bin 3 reads silent");
+        assert!(
+            coarse.iter().all(|value| value.is_finite()),
+            "an empty bucket produced a NaN",
+        );
+    }
+
+    #[test]
+    fn a_silent_spectrum_has_a_silent_coarse_spectrum_and_no_nans() {
+        let coarse = coarse_spectrum(&vec![0.0; SIZE / 2 + 1], bin_hz(RATE, SIZE));
+
+        assert!(coarse.iter().all(|&value| value == 0.0), "{coarse:?}");
+    }
+
+    /// Buckets average rather than sum, so a bucket that happens to straddle
+    /// twice as many FFT bins does not read twice as loud on the same noise.
+    #[test]
+    fn a_bucket_averages_its_bins_rather_than_summing_them() {
+        let hz = bin_hz(RATE, SIZE);
+        let mut one = vec![0.0f32; SIZE / 2 + 1];
+        let mut both = one.clone();
+
+        // Bins 200 and 201 (~4.3 kHz) share a bucket at this window size.
+        one[200] = 1.0;
+        both[200] = 1.0;
+        both[201] = 1.0;
+
+        let bucket = (0..SPECTRUM_BINS)
+            .find(|&bucket| {
+                let (low, high) = (bucket_edge(bucket), bucket_edge(bucket + 1));
+                (low..high).contains(&(200.0 * hz)) && (low..high).contains(&(201.0 * hz))
+            })
+            .expect("bins 200 and 201 share a bucket at a 2048-sample window");
+
+        let single = coarse_spectrum(&one, hz)[bucket];
+        let pair = coarse_spectrum(&both, hz)[bucket];
+
+        assert!(pair > single, "two bins carry more energy than one");
+        assert!(
+            pair < 2.0 * single,
+            "the bucket summed its bins: {single} became {pair}",
+        );
     }
 
     #[test]
