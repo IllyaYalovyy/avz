@@ -30,12 +30,17 @@ required.
 
 **Interactions:** 1
 
-**Regression coverage:** Partial. The pipeline runs end to end and muxes the
-original audio: `render_writes_a_sampled_mp4_next_to_the_input`,
-`a_render_without_a_sample_covers_every_frame_of_the_song`,
-`muxed_audio_stream_is_copied_not_reencoded`. The visuals are still the M1
-tracer bullet, not a preset (`the_rendered_brightness_visibly_follows_the_loudness_of_the_song`),
-and there is no progress bar yet — both land with RFC-001 Steps 14 and 21.
+**Regression coverage:** The pipeline runs end to end and the assembled binary
+writes a playable mp4:
+`a_two_second_software_render_is_a_playable_mp4_with_one_video_and_one_audio_stream`,
+`render_writes_a_sampled_mp4_next_to_the_input`,
+`a_render_without_a_sample_covers_every_frame_of_the_song`. The audio is muxed
+untouched: `muxed_audio_stream_is_copied_not_reencoded`. The visuals move with
+the music: `the_rendered_brightness_visibly_follows_the_loudness_of_the_song`,
+`every_feature_pulse_reacts_to_changes_the_frame`. The bar draws its phase, frame
+count, fps, and ETA: `the_rendering_bar_draws_its_frame_count_render_fps_and_eta`,
+`progress_reports_the_three_phases_in_order_with_a_frame_total`. That 1080p is the
+default resolution is pinned by `example_parses_under_strict_validation_into_the_built_in_defaults`.
 
 ## UT-002: Iterate quickly on an excerpt
 
@@ -62,8 +67,10 @@ covering the same range:
 `the_audio_starts_at_the_first_rendered_frames_timestamp`. The reduced default
 resolution: `a_sample_render_defaults_to_a_reduced_resolution`,
 `render_writes_a_sampled_mp4_next_to_the_input`. Both `--sample` spellings:
-`sample_accepts_a_bare_duration_and_a_clock_range`. `--preset` is not a flag
-yet (RFC-001 Step 15).
+`sample_accepts_a_bare_duration_and_a_clock_range`. `--preset`:
+`preset_names_the_visualizer_to_render`, `the_preset_flag_reaches_the_cli_config_layer`,
+`render_with_an_unknown_preset_exits_2_and_names_the_known_ones`. `ribbons` is
+deferred (RFC-001 NG1); the flow reads the same with `nebula`.
 
 ## UT-003: Render on a machine with no GPU
 
@@ -112,8 +119,11 @@ valid range, and description, plus any `perf_hint` for software rendering.
 binary); `the_listing_names_every_preset_and_describes_it`,
 `the_schema_print_shows_every_column_for_every_type`,
 `the_schema_columns_are_aligned`,
-`a_perf_hint_is_printed_when_the_schema_carries_one` (the formatter). `nebula`
-lands in RFC-001 Step 17; until then `pulse` is the only preset to print.
+`a_perf_hint_is_printed_when_the_schema_carries_one` (the formatter). Both
+shipped presets are listed because the formatter reads the registry, which
+`the_listing_names_every_preset_and_describes_it` iterates rather than hardcodes.
+Whether a `perf_hint` is *true* has no assertion — it is a release-checklist
+measurement (`docs/RELEASE.md`).
 
 ## UT-005: Inspect an input file before rendering
 
@@ -148,7 +158,19 @@ silently ignored.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:** Reproducibility is asserted a layer at a time, because
+no test can compare two mp4s: the analysis of a song is the same twice
+(`the_same_song_analyzes_to_the_same_timeline_twice`), the frames a preset draws
+from the same inputs hash the same (`same_inputs_same_hash_twice`), and a
+different seed is a different picture (`different_seed_different_hash`). The seed
+a config *omits* is the file stem, hashed identically on every toolchain
+(`the_auto_seed_hash_is_pinned_across_toolchains`). Strict keys:
+`unknown_toml_key_rejected_with_suggestion`,
+`a_config_file_that_cannot_be_opened_says_why_without_an_errno`. The file reaches
+the render: `the_example_config_is_accepted_by_render`,
+`a_config_files_preset_params_are_validated_against_the_schema`. What stays
+manual is the last mile — that the *encoder* is deterministic — which
+`VISION.md` §2 excludes by saying "modulo encoder nondeterminism".
 
 ## UT-007: Override one parameter on top of a config
 
@@ -212,7 +234,19 @@ skip the card rather than failing.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:** The layers reach the pixels:
+`a_background_image_reaches_the_rendered_frames`,
+`darkening_the_background_dims_the_rendered_frames`,
+`the_text_card_from_id3_reaches_the_rendered_frames`,
+`the_text_card_renders_its_golden_frames`. The fit modes are integer geometry and
+tested as such (`a_contained_image_letterboxes_onto_the_palette_backdrop` and its
+neighbours in `render/background.rs`). The card's schedule:
+`opacity_envelope_matches_in_hold_fade_windows`,
+`the_text_card_is_invisible_before_it_fades_in`. Missing tags:
+`missing_tags_warns_and_skips_card`. The background *video* is RFC-001 NG2 and
+does not exist; that it says so rather than rendering without the layer the user
+asked for is `a_background_video_is_refused_with_a_message_that_says_it_is_not_built_yet`
+and `a_background_video_is_refused_before_the_song_is_even_decoded`.
 
 ## UT-010: Batch-render an album unattended
 
@@ -229,4 +263,18 @@ half-written `.mp4` behind.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:** The loop itself, through the binary:
+`an_album_batch_renders_every_song_to_its_own_mp4_unattended` — three songs in one
+directory, each writing its own `<stem>.mp4`, none leaving a `.part` behind. What
+a shell needs from a failure is the exit code, and the whole matrix is
+`crates/avz-cli/tests/exit_codes.rs`: 2 says every remaining track will fail the
+same way, 3 says this one song is unreadable, 4 says the render or encode broke.
+Nothing appears at the output path early:
+`the_output_appears_only_after_a_successful_finish`,
+`ffmpeg_death_midrender_leaves_no_output_file`,
+`a_dropped_encoder_kills_ffmpeg_and_removes_the_part_file`.
+
+The full acceptance run — a real album, at full resolution, unattended — is
+`scripts/album-acceptance.sh`, which reports track count, wall time, adapter, and
+every warning, and fails on the first intervention. It is run per release
+(`docs/RELEASE.md`), not per commit.

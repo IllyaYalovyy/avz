@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-07-09) |
+| Status | Implemented (2026-07-10) |
 | Author(s) | Illya Yalovyy |
 | Supersedes | - |
 | Superseded by | - |
@@ -323,6 +323,31 @@ specific to this RFC:
   the schema format as JSON, `toml` cannot read it, and a hand-rolled parser
   would be a parser to maintain. It is the same ecosystem, the same maintainers,
   and the same `derive` already in the tree; it adds `itoa`, `ryu`, and `memchr`.
+- **`--preset` is a flag, not only a config key** (decided in Step 23). Steps 15
+  and 17 shipped the registry, the schemas, and `visual.preset`, and left the
+  first flag of `VISION.md` §3's typical invocation — `avz render song.mp3
+  --preset nebula` — spelled `--set visual.preset=nebula`. G7 is the §3 contract,
+  and a release whose README cannot print §3 verbatim has not met it. The flag is
+  a `String` that clap does not validate, because the registry is what knows which
+  names exist and `pipeline::render` already rejects an unknown one, before the
+  song is decoded, with the list of those that do. The risk it carries is not
+  parsing but plumbing: a flag that reaches `RenderArgs` and not `ConfigLayer`
+  renders `pulse` and says nothing, which is what
+  `render_with_an_unknown_preset_exits_2_and_names_the_known_ones` catches by
+  putting a *valid* preset in a config file and a typo on the command line — a
+  dropped flag makes that render succeed.
+- **`nebula`'s `perf_hint` was wrong, and is now a measurement** (decided in Step
+  23). It promised that `octaves = 2` "roughly halves the frame time" on software
+  rendering. Measured on lavapipe (llvmpipe, Mesa 25.3.6, 16 threads), 300 frames
+  at 1080p, rendering phase only, with a draining ffmpeg stand-in so the encoder's
+  backpressure is not counted: `octaves` 6/4/2/1 → 40.7/45.9/53.8/59.0 fps.
+  Dropping from the default 4 to 2 buys 15% of frame time, not 50% — the three
+  `fbm` calls are about a third of the shader, and the readback and the fixed
+  per-pixel work are the rest. What *does* scale is pixel count: the same frames at
+  720p run 2.23× faster, against a pixel ratio of 2.25. The hint now says that,
+  and points at `--sample` first. A hint is user-facing advice with no assertion
+  behind it; `docs/RELEASE.md` requires it be re-measured per release, and
+  `docs/TESTING.md` carries the risk row.
 - **Remote CI is advisory** (owner decision, 2026-07-09). The local
   `./scripts/quality.sh` gate — tests plus the invariant hooks in
   `scripts/quality.d/` — is the authority for "done". The workflow Step 10
@@ -422,7 +447,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
   audit *(prerequisite: Step 9)*
 - [x] **Step 22** - `avz config --example`, `--seed`/default seed, `--quality`
   *(prerequisite: Steps 15, 16)*
-- [ ] **Step 23** - Release v0.1: README usage docs, `cargo install` from clean
+- [x] **Step 23** - Release v0.1: README usage docs, `cargo install` from clean
   checkout, album batch acceptance run, tag *(prerequisite: all)*
 
 ## Open Questions
@@ -436,8 +461,13 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
   everything CC0. The audio is a decaying 60 Hz kick under a 1 kHz tone, so it
   also serves the Step 10 render test: loudness visibly moves and the bass band
   is separable from the mid.
-- [ ] **Q2** - Exact `pulse` and `nebula` default parameter values — resolved
-  during the M2 manual tuning pass against reference tracks.
+- [x] **Q2** - Exact `pulse` and `nebula` default parameter values. **Resolved in
+  Steps 14, 15, and 17:** every default now lives in the preset's own JSON schema,
+  which is the single place `avz presets` prints from and config validation reads.
+  `param_reaches_declared_uniform_slot` pins them from the other side — the
+  committed golden hashes must be what the schema's defaults render, so a default
+  that drifts fails the suite rather than a video nobody re-watches. They remain
+  the surface the manual listening pass moves (`docs/TESTING.md`, `docs/RELEASE.md`).
 
 ## References
 

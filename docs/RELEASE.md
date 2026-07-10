@@ -5,7 +5,8 @@ Use this checklist when preparing a release.
 ## Before Release
 
 - [ ] Update version numbers in every package manifest.
-- [ ] Update `CHANGELOG.md` or release notes.
+- [ ] Update `CHANGELOG.md`, including a **Known issues** section naming what is
+      deferred and where it is tracked.
 - [ ] Run `./scripts/quality.sh`.
 - [ ] Run any project-specific packaging, installer, or smoke tests.
 - [ ] Verify docs describe the released behavior.
@@ -24,10 +25,24 @@ Use this checklist when preparing a release.
       resolution, and its `perf_hint` is accurate on software rendering.
 - [ ] `avz config --example` output can be fed straight back into `--config`.
 - [ ] `avz presets` and `avz presets <name>` reflect the shipped schemas.
+- [ ] Every `perf_hint` is *re-measured*, not re-read. A hint is advice with no
+      assertion behind it, and a shader change can make yesterday's number a lie.
+      Time the rendering phase alone, with an ffmpeg stand-in that drains stdin,
+      or x264's backpressure is what you will measure.
 - [ ] `cargo install --path crates/avz-cli` works from a clean checkout with
       only system `ffmpeg` present.
 - [ ] Acceptance test: an entire album batch-renders unattended via a shell loop
-      with zero interventions.
+      with zero interventions:
+
+      ```bash
+      cargo build --release -p avz-cli
+      ./scripts/album-acceptance.sh path/to/album album.toml   # or no args, for a synthetic stand-in
+      ADAPTER=software ./scripts/album-acceptance.sh path/to/album album.toml
+      ```
+
+      Record its track count, wall time, adapter, and warnings in the release
+      notes. The script fails on the first intervention; a real album is the gate,
+      and the synthetic stand-in is only a smoke test of the loop.
 
 ## Release Notes
 
