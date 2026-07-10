@@ -10,13 +10,19 @@
 //!
 //! **Why one texture and not a ping-pong pair.** A pair exists to keep a shader
 //! from sampling the attachment it is writing. avz never has that problem: the
-//! preset draws into [`Offscreen`], which is where the frame is read back from,
-//! and the history below is a second texture the frame is copied into afterwards.
-//! The copy is GPU-side and costs one frame of bandwidth — the readback that
-//! follows it already costs more. Two histories would buy a swap in place of a
-//! copy and a second full-resolution texture in exchange.
+//! preset draws into its [`Layer`], and the history below is a second texture the
+//! layer is copied into afterwards. The copy is GPU-side and costs one frame of
+//! bandwidth — the readback that follows it already costs more. Two histories
+//! would buy a swap in place of a copy and a second full-resolution texture in
+//! exchange.
+//!
+//! **The history is the visualizer's own layer, not the composited frame.** A
+//! trail preset advects what *it* drew last frame, so what it samples is
+//! premultiplied light with the background nowhere in it. Feeding back the
+//! composited frame would smear the backdrop into every trail.
 
-use crate::render::offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+use crate::render::layer::Layer;
+use crate::render::offscreen::{FRAME_FORMAT, Gpu};
 
 /// Last frame's pixels, and the sampler a preset reads them through.
 ///
@@ -46,7 +52,7 @@ impl Feedback {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            // The same format as the frame, so the copy below is a plain blit and
+            // The same format as the layer, so the copy below is a plain blit and
             // the shader samples in linear light like everything else.
             format: FRAME_FORMAT,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
@@ -137,7 +143,7 @@ impl Feedback {
         ]
     }
 
-    /// Keep the frame just drawn into `target` as the next frame's history.
+    /// Keep the layer just drawn into `target` as the next frame's history.
     ///
     /// Recorded into the same encoder as the draw, after the render pass ends:
     /// the shader sampled the *old* contents, and wgpu inserts the barrier that
@@ -145,15 +151,15 @@ impl Feedback {
     ///
     /// # Panics
     ///
-    /// If `target` is not the frame this history was sized for. The visualizer
+    /// If `target` is not the layer this history was sized for. The visualizer
     /// takes its target at construction, so a mismatch is a caller bug rather
     /// than anything a user can provoke.
-    pub fn capture(&self, encoder: &mut wgpu::CommandEncoder, target: &Offscreen) {
+    pub fn capture(&self, encoder: &mut wgpu::CommandEncoder, target: &Layer) {
         let size = target.texture().size();
         assert_eq!(
             size,
             self.texture.size(),
-            "the feedback texture was built for a different frame size",
+            "the feedback texture was built for a different layer size",
         );
 
         encoder.copy_texture_to_texture(

@@ -8,6 +8,10 @@
 //! `VISION.md` §6 uniform contract. Everything a preset sees comes from
 //! [`Globals`]: the palette, the frame's features, and `frame_index / fps` as
 //! the only clock.
+//!
+//! Each frame is a layer stack flattened by the [`Compositor`]: the palette
+//! backdrop at the bottom, the visualizer's premultiplied light over it, and —
+//! once RFC-001 Steps 19 and 20 land — the background image and the text card.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -16,7 +20,8 @@ use crate::analysis::{self, EnvelopeParams};
 use crate::config::{Config, SampleRange, Seed};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::render::{
-    AdapterChoice, AdapterKind, Globals, Gpu, Offscreen, Preset, Visualizer, palette,
+    AdapterChoice, AdapterKind, Backdrop, Compositor, Globals, Gpu, Layer, Offscreen, Preset,
+    Visualizer, palette,
 };
 use crate::{Error, Phase, Progress, Result};
 
@@ -105,7 +110,15 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
 
     let resolution = config.output.resolution;
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
-    let visualizer = Visualizer::new(&gpu, preset, &target)?;
+
+    // The layer stack, bottom to top (`VISION.md` §5.3). The background image and
+    // video (RFC-001 Step 19, NG2) replace the backdrop below; the text card
+    // (Step 20) is appended above the visualizer. Both are entries in this slice.
+    let background = Backdrop::default().layer(&gpu, resolution.width, resolution.height, palette);
+    let visual = Layer::new(&gpu, resolution.width, resolution.height, "avz visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual)?;
+    let compositor = Compositor::new(&gpu, &[&background, &visual])?;
+
     let seed = seed_value(config.visual.seed);
 
     let settings = EncodeSettings {
@@ -142,7 +155,8 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
             palette,
             params,
         );
-        visualizer.draw(&gpu, &target, &globals);
+        visualizer.draw(&gpu, &visual, &globals);
+        compositor.composite(&gpu, &target);
         target.read_rgba_into(&gpu, &mut pixels)?;
         encoder.write_frame(&pixels)?;
         progress.advance(Phase::Rendering, 1);

@@ -9,7 +9,14 @@
 // Determinism: `time` is `frame_index / fps` and the only clock; every random
 // number is a hash of the fragment position, `time`, and `seed` (AGENTS.md).
 //
-// Output is linear — the render target is `Rgba8UnormSrgb` and encodes on write.
+// Output is linear — the layer target is `Rgba8UnormSrgb` and encodes on write.
+//
+// Output is also **premultiplied** (VISION.md §5.3). `pulse` draws light onto its
+// own transparent layer and never paints a background: the RGB it returns is the
+// light it emits, and the alpha is how much of the backdrop that light hides.
+// Where the preset is dark it is transparent, and the palette gradient beneath
+// shows through untouched — which is why every term below is scaled by `rms_env`
+// with no floor under it. Silence is not "nearly black" any more; it is nothing.
 //
 // The `params` slots below are declared in `pulse.json`, which is the only place
 // their names, defaults, and ranges live. Every default reproduces the constant
@@ -121,7 +128,9 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     // Shimmer: per-pixel, per-frame grain, small enough to read as texture.
     let grain = hash21(position.xy + vec2<f32>(g.time * 60.0, g.seed * 913.0));
 
-    var color = g.pal[0].rgb * 0.35;
+    // Light, starting from none: the backdrop is the compositor's layer, not
+    // this one's, so `pulse` adds to a transparent frame rather than to `pal[0]`.
+    var color = vec3<f32>(0.0);
     // A hit lands on the beat and not after it: `onset` is 1.0 on exactly the
     // frame the flux peaked (`analysis::onset`), so the flash is the core going
     // brighter and wider on that frame, with no smoothing in front of it.
@@ -131,12 +140,19 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     color += hue * g.flux * 0.12 * g.params[1].z;
     color += vec3<f32>((grain - 0.5) * g.params[1].y * g.air_env);
 
-    // A vignette keeps the corners out of the way of the geometry.
+    // A vignette keeps the corners out of the way of the geometry — and, now that
+    // the frame beneath is a gradient rather than black, opens them onto it.
     color *= 1.0 - g.params[1].w * smoothstep(0.35, 0.95, r);
 
-    // Loudness is the last word: the whole frame breathes with the song, and a
-    // silent passage goes nearly black rather than sitting at half brightness.
-    color *= 0.18 + 0.82 * g.rms_env;
+    // Loudness is the last word: the geometry breathes with the song, and a
+    // silent passage fades out entirely, leaving the backdrop alone.
+    color *= g.rms_env;
+    color = max(color, vec3<f32>(0.0));
 
-    return vec4<f32>(max(color, vec3<f32>(0.0)), 1.0);
+    // Coverage is the brightest channel of the light: a saturated highlight hides
+    // what is under it, a faint glow veils it, and unlit pixels leave it be. The
+    // RGB is already the light `alpha` worth of this layer emits, which is what
+    // "premultiplied" means, so it is returned as it stands.
+    let alpha = clamp(max(color.r, max(color.g, color.b)), 0.0, 1.0);
+    return vec4<f32>(color, alpha);
 }

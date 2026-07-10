@@ -19,7 +19,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use avz_core::analysis::FeatureFrame;
 use avz_core::config::Palette;
 use avz_core::render::{
-    AdapterChoice, Globals, Gpu, Offscreen, PARAM_SLOTS, PackedParams, Preset, Visualizer, palette,
+    AdapterChoice, Compositor, Globals, Gpu, Layer, Offscreen, PARAM_SLOTS, PackedParams, Preset,
+    Visualizer, palette,
 };
 
 const WIDTH: u32 = 64;
@@ -114,12 +115,18 @@ fn defaults(preset: &Preset) -> PackedParams {
 /// One visualizer across the whole sequence, exactly as `pipeline::render` does
 /// it: the feedback texture is per-render state, so a fresh visualizer starts
 /// from black again.
+///
+/// The visualizer layer is composited alone, over no background at all, so what
+/// comes back is the premultiplied light the preset wrote and nothing else. The
+/// shaders below all return alpha 1.0, so that is their color, unveiled.
 fn render_sequence(preset: &Preset, frames: usize) -> Vec<u8> {
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software)
         .expect("the feedback tests need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
     let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 64x64 frame");
-    let visualizer = Visualizer::new(&gpu, preset, &target).expect("the test preset compiles");
+    let visual = Layer::new(&gpu, WIDTH, HEIGHT, "visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual).expect("the test preset compiles");
+    let compositor = Compositor::new(&gpu, &[&visual]).expect("one frame-sized layer");
 
     let colors = palette::resolve(&Palette::Named("ember".to_owned())).expect("`ember` ships");
     let params = defaults(preset);
@@ -134,8 +141,9 @@ fn render_sequence(preset: &Preset, frames: usize) -> Vec<u8> {
             colors,
             params,
         );
-        visualizer.draw(&gpu, &target, &globals);
+        visualizer.draw(&gpu, &visual, &globals);
     }
+    compositor.composite(&gpu, &target);
 
     target.read_rgba(&gpu).expect("the frame reads back")
 }
@@ -217,9 +225,9 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
 
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("the feedback tests need lavapipe");
-    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 64x64 frame");
+    let visual = Layer::new(&gpu, WIDTH, HEIGHT, "visualizer");
 
-    let err = Visualizer::new(&gpu, &sneaky, &target)
+    let err = Visualizer::new(&gpu, &sneaky, &visual)
         .expect_err("`needs_feedback` is false, so `@binding(1)` is bound to nothing");
 
     assert!(

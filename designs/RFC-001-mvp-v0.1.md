@@ -391,7 +391,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 **M4 — Layers** *(accept: config example from VISION §5.5 minus bg-video renders correctly)*
 
-- [ ] **Step 18** - Compositor pass: premultiplied-alpha layer stack *(prerequisite: Step 14)*
+- [x] **Step 18** - Compositor pass: premultiplied-alpha layer stack *(prerequisite: Step 14)*
 - [ ] **Step 19** - Background image layer: fit modes, blur, darken *(prerequisite: Step 18)*
 - [ ] **Step 20** - Text card layer: cosmic-text, ID3 defaults, timing *(prerequisite: Step 18)*
 

@@ -5,6 +5,12 @@
 //! text layers with premultiplied alpha; frames are read back as RGBA
 //! (`VISION.md` §5.3, §6, §7).
 //!
+//! A render owns one [`Offscreen`] frame, one [`Layer`] per layer that exists,
+//! and one [`Compositor`] that flattens them into it. A preset draws light and
+//! coverage into the visualizer layer and never sees what is beneath it; the
+//! [`Backdrop`] under it is the palette rather than the black the presets used to
+//! paint for themselves.
+//!
 //! Animation time is always `frame_index / fps`, never wall clock. Readback
 //! row-padding (256-byte alignment) is handled in exactly one place:
 //! [`readback::RowLayout`].
@@ -12,8 +18,11 @@
 //! Populated by RFC-001 Steps 7, 14, 17, 18, 19, and 20.
 
 pub mod adapter;
+pub mod background;
+pub mod compositor;
 pub mod feedback;
 pub mod globals;
+pub mod layer;
 pub mod offscreen;
 pub mod palette;
 pub mod preset;
@@ -21,8 +30,11 @@ pub mod readback;
 pub mod schema;
 
 pub use adapter::{AdapterChoice, AdapterKind};
+pub use background::Backdrop;
+pub use compositor::Compositor;
 pub use feedback::Feedback;
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
+pub use layer::Layer;
 pub use offscreen::{FRAME_FORMAT, Gpu, Offscreen};
 pub use palette::{BUILT_INS, BuiltIn, LinearPalette};
 pub use preset::{PRESETS, Preset, Visualizer};
