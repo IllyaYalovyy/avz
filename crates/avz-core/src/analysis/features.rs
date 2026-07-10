@@ -3,15 +3,16 @@
 //! One [`FeatureFrame`] per video frame, so the renderer can index features by
 //! `frame_index` and never has to resample anything. This module owns frame
 //! timing and window placement; the FFT and the pure functions that read
-//! features off a magnitude spectrum live in [`super::spectrum`]. Onsets and the
-//! envelope/normalization passes arrive in RFC-001 Steps 12–13 and slot into the
-//! same struct.
+//! features off a magnitude spectrum live in [`super::spectrum`], and the
+//! flux-to-onset detector in [`super::onset`]. The envelope and normalization
+//! passes arrive in RFC-001 Step 13 and slot into the same struct.
 
 use std::time::Duration;
 
 use rayon::prelude::*;
 
 use crate::analysis::DecodedAudio;
+use crate::analysis::onset::{self, OnsetParams};
 use crate::analysis::spectrum::{self, Spectrograph};
 use crate::{Error, Result};
 
@@ -40,6 +41,10 @@ pub struct FeatureFrame {
     pub air: f32,
     /// Positive spectral flux against the previous frame. Zero on frame 0.
     pub flux: f32,
+    /// A hit, decaying: exactly 1.0 on the frame an onset landed on, then
+    /// falling exponentially toward zero (`VISION.md` §6). Decayed here rather
+    /// than in WGSL because a shader sees one frame at a time.
+    pub onset: f32,
     /// Spectral centroid over Nyquist, `0.0..=1.0`. Zero for a silent window.
     pub centroid: f32,
 }
@@ -88,6 +93,26 @@ impl FeatureTimeline {
             Some(&last) => *self.frames.get(frame_index).unwrap_or(&last),
             None => FeatureFrame::default(),
         }
+    }
+
+    /// The features `ahead` frames after `frame_index`, clamped to the last
+    /// frame.
+    ///
+    /// Analysis finishes before rendering starts, so a preset may read the
+    /// future and start moving *into* an onset rather than after it — which is
+    /// the difference between hitting the beat and lagging it (`VISION.md`
+    /// §4.2). The accessor is the whole of the plumbing; presets opt in.
+    pub fn lookahead(&self, frame_index: usize, ahead: usize) -> FeatureFrame {
+        self.frame(frame_index.saturating_add(ahead))
+    }
+
+    /// Whether a hit landed on frame `frame_index`.
+    ///
+    /// Recovers the binary onset train from the decaying impulse: the decay
+    /// strictly shrinks it, so a frame reads exactly 1.0 if and only if it was
+    /// struck (`onset::detect`, `only_a_struck_frame_reads_a_full_impulse`).
+    pub fn is_onset(&self, frame_index: usize) -> bool {
+        self.frame(frame_index).onset >= 1.0
     }
 }
 
@@ -145,8 +170,10 @@ pub fn analyze(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
                     mid,
                     high,
                     air,
-                    // Flux compares neighbours, so it is filled in below.
+                    // Flux compares neighbours, and onsets compare a second of
+                    // flux, so both are filled in below.
                     flux: 0.0,
+                    onset: 0.0,
                     centroid: spectrum::spectral_centroid(&magnitudes, bin_hz),
                 };
 
@@ -162,7 +189,21 @@ pub fn analyze(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
         frames[index + 1].flux = spectrum::spectral_flux(&pair[0], &pair[1]);
     }
 
-    tracing::debug!(fps, frames = frame_count, window, "built feature timeline");
+    // Onsets threshold each frame's flux against a second of its neighbours, so
+    // they need the whole flux track — which the two-pass design already has.
+    let flux: Vec<f32> = frames.iter().map(|frame| frame.flux).collect();
+    let onsets = onset::detect(&flux, fps, OnsetParams::default());
+    for (frame, impulse) in frames.iter_mut().zip(onsets.impulse) {
+        frame.onset = impulse;
+    }
+
+    tracing::debug!(
+        fps,
+        frames = frame_count,
+        window,
+        onsets = onsets.hits.iter().filter(|&&hit| hit).count(),
+        "built feature timeline"
+    );
 
     Ok(FeatureTimeline { fps, frames })
 }
@@ -264,6 +305,47 @@ mod tests {
 
     fn silence(seconds: f64, sample_rate: u32) -> Vec<f32> {
         vec![0.0; (seconds * f64::from(sample_rate)) as usize]
+    }
+
+    /// A `seconds`-long noise floor. Seeded, because a re-run of a test that
+    /// hunts for a threshold must hunt for the same one (`AGENTS.md`,
+    /// determinism).
+    fn noise(seconds: f64, amplitude: f32, seed: u64, sample_rate: u32) -> Vec<f32> {
+        let count = (seconds * f64::from(sample_rate)) as usize;
+        let mut state = seed;
+
+        (0..count)
+            .map(|_| {
+                state = state
+                    .wrapping_mul(6_364_136_223_846_793_005)
+                    .wrapping_add(1_442_695_040_888_963_407);
+                let unit = (state >> 40) as f32 / (1u64 << 23) as f32;
+                (unit - 1.0) * amplitude
+            })
+            .collect()
+    }
+
+    /// A broadband click: 64 samples of alternating sign, which spreads energy
+    /// across the whole spectrum the way a drum hit does.
+    fn click_at(samples: &mut [f32], start: usize, amplitude: f32) {
+        for (offset, sample) in samples[start..start + 64].iter_mut().enumerate() {
+            *sample += if offset % 2 == 0 {
+                amplitude
+            } else {
+                -amplitude
+            };
+        }
+    }
+
+    /// The sample index of `seconds` into the song.
+    fn at(seconds: f64, sample_rate: u32) -> usize {
+        (seconds * f64::from(sample_rate)) as usize
+    }
+
+    fn onset_frames(timeline: &FeatureTimeline) -> Vec<usize> {
+        (0..timeline.len())
+            .filter(|&index| timeline.is_onset(index))
+            .collect()
     }
 
     /// The five band energies of the middle frame of a `freq` Hz tone, in the
@@ -511,6 +593,192 @@ mod tests {
         );
     }
 
+    /// The canonical onset test (`docs/TESTING.md` risk matrix, RFC-001 Step
+    /// 12): a click every half second over a noise floor lands one onset on
+    /// each click and none anywhere else. Checked at both `fps` the CLI can
+    /// render, because the threshold window, the refractory period, and the
+    /// impulse decay are all specified in *time* and derived into frames.
+    #[test]
+    fn click_train_produces_onsets_at_expected_frames() {
+        let beats = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0, 3.5];
+
+        for fps in [30u32, 60] {
+            let mut samples = noise(4.0, 0.005, 7, RATE);
+            for beat in beats {
+                click_at(&mut samples, at(beat, RATE), 0.9);
+            }
+
+            let timeline = analyze(&audio(samples, RATE), fps).expect("analyzes");
+            let onsets = onset_frames(&timeline);
+
+            assert_eq!(
+                onsets.len(),
+                beats.len(),
+                "{fps} fps: {} clicks produced onsets on {onsets:?}",
+                beats.len()
+            );
+            for (onset, beat) in onsets.iter().zip(beats) {
+                let expected = (beat * f64::from(fps)) as usize;
+                assert!(
+                    onset.abs_diff(expected) <= 1,
+                    "{fps} fps: the click at {beat}s belongs to frame {expected}, not {onset}"
+                );
+            }
+        }
+    }
+
+    /// A held note is not a hit, however loud it is. Its flux is the FFT's own
+    /// numerical noise, and a threshold of `median + k·MAD` alone — with a MAD
+    /// of almost nothing — would fire on the loudest frame of it.
+    #[test]
+    fn steady_tone_produces_no_onsets() {
+        for fps in [30u32, 60] {
+            let timeline =
+                analyze(&audio(sine(1_000.0, 0.9, 3.0, RATE), RATE), fps).expect("analyzes");
+
+            assert!(
+                onset_frames(&timeline).is_empty(),
+                "{fps} fps: a steady tone onsets on {:?}",
+                onset_frames(&timeline)
+            );
+        }
+    }
+
+    #[test]
+    fn silence_produces_no_onsets() {
+        for fps in [30u32, 60] {
+            let timeline = analyze(&audio(silence(3.0, RATE), RATE), fps).expect("analyzes");
+
+            assert!(onset_frames(&timeline).is_empty());
+        }
+    }
+
+    /// Why the threshold is adaptive at all. A tenth-scale click after a dense
+    /// passage is a hit in the passage it belongs to, and the test proves the
+    /// point by checking that the *global* threshold — set by the loud half —
+    /// would have missed every one of them.
+    #[test]
+    fn quiet_section_clicks_still_detected() {
+        // A dense, loud first six seconds. Broadband noise, because the
+        // threshold reads flux and only a spectrum that keeps *changing* keeps
+        // flux high — a steady click train settles into a steady spectrum.
+        let mut samples = noise(6.0, 0.4, 11, RATE);
+        // Then near-silence, and five clicks at a tenth of the amplitude.
+        samples.extend(noise(4.0, 0.005, 23, RATE));
+
+        let quiet = [7.0, 7.5, 8.0, 8.5, 9.0];
+        for beat in quiet {
+            click_at(&mut samples, at(beat, RATE), 0.1);
+        }
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+
+        for beat in quiet {
+            let frame = (beat * 30.0) as usize;
+            assert!(
+                (frame - 1..=frame + 1).any(|index| timeline.is_onset(index)),
+                "the quiet click at {beat}s was missed; onsets: {:?}",
+                onset_frames(&timeline)
+            );
+            assert!(
+                timeline.frame(frame).flux < global_threshold(&timeline),
+                "the quiet click at {beat}s clears a global threshold too, so \
+                 this test would pass without an adaptive one"
+            );
+        }
+    }
+
+    /// `median + k·MAD` over the whole song rather than a centered window.
+    fn global_threshold(timeline: &FeatureTimeline) -> f32 {
+        let mut flux: Vec<f32> = timeline.frames.iter().map(|frame| frame.flux).collect();
+        flux.sort_by(f32::total_cmp);
+        let median = flux[flux.len() / 2];
+
+        let mut deviations: Vec<f32> = flux.iter().map(|&f| (f - median).abs()).collect();
+        deviations.sort_by(f32::total_cmp);
+
+        median + 2.5 * deviations[deviations.len() / 2]
+    }
+
+    /// One physical hit smears across the analysis windows that overlap it. Two
+    /// clicks 30 ms apart are inside the 100 ms refractory period at 60 fps —
+    /// two frames apart, both above threshold — and must read as one onset.
+    #[test]
+    fn two_clicks_inside_the_refractory_period_are_one_onset() {
+        let mut samples = noise(3.0, 0.005, 3, RATE);
+        click_at(&mut samples, at(1.0, RATE), 0.9);
+        click_at(&mut samples, at(1.03, RATE), 0.9);
+
+        let timeline = analyze(&audio(samples, RATE), 60).expect("analyzes");
+        let onsets = onset_frames(&timeline);
+
+        assert_eq!(onsets.len(), 1, "two triggers, one hit; got {onsets:?}");
+        assert!(onsets[0].abs_diff(60) <= 1, "onset at frame {}", onsets[0]);
+    }
+
+    /// The threshold window is centered and ±1 s wide, so the first and last
+    /// second of every song have no full window around them. It clamps rather
+    /// than pads, and a song shorter than the window is nothing but edges.
+    #[test]
+    fn first_and_last_second_do_not_panic() {
+        for fps in [30u32, 60] {
+            let mut samples = noise(1.5, 0.005, 5, RATE);
+            click_at(&mut samples, at(0.05, RATE), 0.9);
+            click_at(&mut samples, at(1.4, RATE), 0.9);
+
+            let timeline = analyze(&audio(samples, RATE), fps).expect("a short song analyzes");
+            let onsets = onset_frames(&timeline);
+
+            assert_eq!(
+                onsets.len(),
+                2,
+                "{fps} fps: a click in each edge window, got {onsets:?}"
+            );
+            assert!(timeline.frames.iter().all(|frame| frame.onset.is_finite()));
+        }
+    }
+
+    /// The impulse the shader reads: 1.0 on the hit, then an exponential fall
+    /// that is monotonic all the way to the next hit.
+    #[test]
+    fn the_onset_impulse_decays_from_each_hit() {
+        let mut samples = noise(3.0, 0.005, 13, RATE);
+        click_at(&mut samples, at(1.0, RATE), 0.9);
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let hit = onset_frames(&timeline)[0];
+
+        assert_eq!(timeline.frame(hit).onset, 1.0);
+        for frame in hit + 1..timeline.len() {
+            assert!(
+                timeline.frame(frame).onset < timeline.frame(frame - 1).onset,
+                "the impulse grew again at frame {frame}"
+            );
+        }
+        // A tenth of a second on, roughly `exp(-0.1 / 0.15)`.
+        assert!((timeline.frame(hit + 3).onset - 0.513).abs() < 0.01);
+    }
+
+    /// Analysis finishes before rendering starts, so a preset can read ahead of
+    /// the frame it is drawing and start moving *into* an onset (`VISION.md`
+    /// §4.2). Reading past the end clamps rather than panics.
+    #[test]
+    fn lookahead_reads_the_frame_n_ahead_and_clamps_at_the_end() {
+        let mut samples = noise(3.0, 0.005, 17, RATE);
+        click_at(&mut samples, at(1.0, RATE), 0.9);
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let hit = onset_frames(&timeline)[0];
+
+        assert_eq!(timeline.lookahead(hit - 5, 5), timeline.frame(hit));
+        assert_eq!(timeline.lookahead(0, 0), timeline.frame(0));
+        assert!(timeline.lookahead(hit - 5, 5).onset >= 1.0);
+
+        let last = *timeline.frames.last().expect("frames exist");
+        assert_eq!(timeline.lookahead(timeline.len() - 1, 100), last);
+        assert_eq!(timeline.lookahead(usize::MAX, usize::MAX), last);
+    }
+
     /// Centroid is the magnitude-weighted mean frequency over Nyquist, so a
     /// bright tone must read higher than a dark one — and both must stay in
     /// `0..=1` regardless of sample rate.
@@ -557,6 +825,7 @@ mod tests {
                 frame.high,
                 frame.air,
                 frame.flux,
+                frame.onset,
                 frame.centroid,
             ] {
                 assert!(value.is_finite(), "{frame:?}");
@@ -774,5 +1043,20 @@ mod tests {
                 timeline.frame(frame).flux
             );
         }
+    }
+
+    /// The same fixture, through the detector: every kick is an onset and
+    /// nothing else is. This is the one onset test whose signal has been
+    /// through a lossy codec, so an implementation tuned to clean synthetic
+    /// clicks comes apart here.
+    #[test]
+    fn the_fixtures_kicks_are_the_only_onsets() {
+        let decoded = crate::analysis::decode(fixture("tone-tagged.mp3")).expect("fixture decodes");
+        let timeline = analyze(&decoded, 30).expect("the fixture analyzes");
+
+        // At 30 fps a kick every half second lands on every 15th frame.
+        let kicks: Vec<usize> = (15..timeline.len()).step_by(15).collect();
+
+        assert_eq!(onset_frames(&timeline), kicks);
     }
 }

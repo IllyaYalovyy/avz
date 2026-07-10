@@ -6,11 +6,18 @@
 //! normalization (`VISION.md` §5.1).
 //!
 //! Populated by RFC-001 Steps 5, 6, 11, 12, and 13.
+//!
+//! The DSP is split so each half can be tested against signals whose correct
+//! answer is known analytically: [`spectrum`] reads features off one magnitude
+//! spectrum, [`onset`] reads hits off a whole flux track, and [`features`] owns
+//! window placement and the parallel drive loop that joins them.
 
 pub mod decode;
 pub mod features;
+pub mod onset;
 pub mod spectrum;
 
 pub use decode::{DecodedAudio, decode};
 pub use features::{FeatureFrame, FeatureTimeline, analyze};
+pub use onset::{OnsetParams, Onsets};
 pub use spectrum::{BAND_COUNT, BAND_EDGES};

@@ -34,11 +34,31 @@ the configured time. Silence must normalize without dividing by zero.
 The FFT half of that lives in `analysis/spectrum.rs` as pure functions over a
 magnitude spectrum and a bin width, which is what lets the band, flux, and
 centroid math be checked against spectra written by hand — a lone bin at a known
-frequency has a centroid nobody has to measure. `analysis/features.rs` owns
-window placement and the parallel drive loop, so its tests assert on whole
-synthesized songs instead. `the_same_song_analyzes_to_the_same_timeline_twice`
-guards a decision invisible from any single window: that rayon's reduction is
-index-ordered, not thread-completion-ordered.
+frequency has a centroid nobody has to measure. `analysis/onset.rs` is the same
+trick one level up: a pure function of a whole flux track and an `fps`, so
+"a spike this far above its neighbours is a hit" can be asserted on flux written
+by hand, with no FFT in the way. `analysis/features.rs` owns window placement and
+the parallel drive loop, so its tests assert on whole synthesized songs instead.
+`the_same_song_analyzes_to_the_same_timeline_twice` guards a decision invisible
+from any single window: that rayon's reduction is index-ordered, not
+thread-completion-ordered.
+
+**The onset noise floor.** `median + k·MAD` is the threshold `VISION.md` §5.1
+specifies, and on its own it fires on silence. Where the MAD is near zero — a
+held chord, digital silence, a steady noise floor — the threshold sits barely
+above the median, and under a Gaussian noise floor `median + 2.5·MAD` is about
+the 91st percentile: roughly one frame in eleven would "onset" on the FFT's own
+numerical noise. `onset::DEFAULT_NOISE_FLOOR` is the absolute gate that closes
+that hole, and it is what `steady_tone_produces_no_onsets`,
+`silence_produces_no_onsets`, and `a_bump_below_the_noise_floor_is_not_a_hit`
+pin. Its scale is meaningful rather than arbitrary because magnitudes are
+amplitude-normalized: an impulse of amplitude `a` produces a flux near `2a` at
+any window length.
+
+The adaptive half earns its keep in `quiet_section_clicks_still_detected`, which
+asserts not only that the quiet clicks are found but that a *global* threshold
+computed over the same song would have missed them — otherwise the test would
+pass against a fixed threshold and prove nothing.
 
 The VISION §5.1 performance budget — low single-digit seconds for a five-minute
 song, which is what the reused FFT planner and the parallel windows buy — is a
@@ -142,7 +162,12 @@ exists, or `TODO` / `manual` with a reason.
 | Edge analysis windows are zero-padded | The song reads ~3 dB quiet on its first frame and then "grows" into the second — an onset the music never played | Unit | `the_first_and_last_frames_read_as_loud_as_the_middle_of_the_song`, `a_song_shorter_than_one_window_still_analyzes` |
 | Parallel window analysis reduces in thread-completion order | A re-render of the same song is a different video | Unit | `the_same_song_analyzes_to_the_same_timeline_twice` |
 | FFT magnitudes scale with the window length | Band and onset thresholds silently become a function of `fps` | Unit | `a_full_scale_sine_reads_unit_amplitude_at_its_bin`, `the_hann_window_is_periodic_and_sums_to_half_its_length` |
-| Onset detection fires late or misses hits | Motion lags the beat — the core promise fails | Unit + manual | TODO |
+| Onset detection fires late or misses hits | Motion lags the beat — the core promise fails | Unit + manual | `click_train_produces_onsets_at_expected_frames`, `a_spike_above_the_local_median_and_mad_is_a_hit`, `a_hit_lands_on_the_peak_not_the_rising_edge`, `the_fixtures_kicks_are_the_only_onsets`; manual listening pass |
+| Onset threshold is global, so a chorus sets the bar a quiet verse can never clear | Half the song never onsets — the visuals go dead exactly where the music got intimate | Unit | `quiet_section_clicks_still_detected` (which also asserts a global threshold *would* miss them), `the_threshold_follows_the_passage_it_sits_in` |
+| A held chord or digital silence onsets on the FFT's own noise, because its MAD is ~0 | The visuals strobe through a sustained note or a silent intro | Unit | `steady_tone_produces_no_onsets`, `silence_produces_no_onsets`, `a_flat_flux_track_has_no_onsets`, `a_bump_below_the_noise_floor_is_not_a_hit` |
+| One physical hit fires two onsets, one per analysis window that overlaps it | Every kick double-flashes | Unit | `refractory_period_merges_double_triggers`, `two_clicks_inside_the_refractory_period_are_one_onset`, `hits_a_refractory_period_apart_are_both_kept` |
+| The onset impulse's decay is a per-frame factor rather than a time constant | A hit fades over twice as long at 60 fps as at 30 | Unit | `onset_impulse_decays_exponentially` (asserted in time, at both fps), `the_onset_impulse_decays_from_each_hit`, `every_hit_restarts_the_impulse_at_one` |
+| The threshold window is zero-padded at the song's edges | The opening chord reads as an onset; the last second stops detecting | Unit | `the_threshold_window_clamps_at_the_song_edges`, `first_and_last_second_do_not_panic` |
 | Envelope follower attack/decay math wrong | Motion is twitchy or sluggish | Unit | TODO |
 | Normalization divides by zero on silence | Panic or NaN frames | Unit | TODO |
 | Analysis frames do not land on video frame timestamps | Cumulative audio/visual drift over a long song | Unit | `analysis_frames_never_drift_from_the_video_frame_clock`, `a_burst_lands_on_the_video_frame_nearest_it`, `one_feature_frame_per_video_frame`, `a_partial_final_video_frame_still_gets_a_feature_frame` |

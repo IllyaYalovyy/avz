@@ -150,6 +150,31 @@ specific to this RFC:
   on those frames and keeps the promise `rms` already made in Step 6: a song does
   not fade in and out at its edges. A song shorter than one window has nothing to
   slide toward and is zero-padded.
+- **The onset threshold carries an absolute noise floor** (decided in Step 12).
+  VISION §5.1 specifies `median + k·MAD` over ±1 s, and that alone fires on
+  silence: where the MAD is near zero — a held chord, a steady noise floor,
+  digital silence — the threshold sits barely above the median, and under a
+  Gaussian noise floor `median + 2.5·MAD` is about the 91st percentile. Roughly
+  one frame in eleven would "onset" on the FFT's own numerical noise. The
+  threshold is therefore `median + k·MAD + noise_floor`. The floor is an
+  absolute flux rather than a fraction of the song's peak, because a
+  peak-relative floor scales with whatever noise it is meant to reject and a
+  steady tone would still onset. Its scale is meaningful: magnitudes are
+  amplitude-normalized, so an impulse of amplitude `a` gives a flux near `2a`
+  regardless of window length, and 0.05 gates out transients below roughly
+  −32 dBFS. Measured: a steady 1 kHz tone peaks at 8e-5 of flux; a click at a
+  tenth of full scale reaches 0.51.
+- **Onsets fire on the flux peak, not the rising edge** (decided in Step 12).
+  A hit's energy builds over the analysis windows that overlap it. Taking the
+  first frame above the threshold puts the onset early *and* lets the refractory
+  period mask the real peak, so a candidate must also be a local maximum of the
+  flux. The refractory period (100 ms) then keeps one physical hit to one onset.
+- **The decaying impulse is computed at analysis time** (decided in Step 12).
+  VISION §6's `onset` uniform is "1.0 at onset, exp decay", but a shader sees one
+  frame at a time and would need state across draws to decay anything. The
+  impulse is decayed into `FeatureFrame.onset` from a time constant, so a hit
+  fades over the same 150 ms at every `fps`. The binary train stays available
+  through `onset::detect` and `FeatureTimeline::is_onset`.
 - **Remote CI is advisory** (owner decision, 2026-07-09). The local
   `./scripts/quality.sh` gate — tests plus the invariant hooks in
   `scripts/quality.d/` — is the authority for "done". The workflow Step 10
@@ -225,7 +250,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 **M2 — Real analysis + envelope tuning** *(accept: `pulse` distinguishes kick/vocals/cymbals; onsets on-beat)*
 
 - [x] **Step 11** - Full FFT features: bands, flux, centroid *(prerequisite: Step 6)*
-- [ ] **Step 12** - Onset detection: adaptive median+MAD threshold *(prerequisite: Step 11)*
+- [x] **Step 12** - Onset detection: adaptive median+MAD threshold *(prerequisite: Step 11)*
 - [ ] **Step 13** - Envelope followers + two-pass normalization *(prerequisite: Step 11)*
 - [ ] **Step 14** - `pulse` preset on the full Globals uniform contract + golden-frame
   harness; manual envelope-tuning pass *(prerequisite: Steps 9, 12, 13)*
