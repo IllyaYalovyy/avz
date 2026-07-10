@@ -13,7 +13,7 @@ use rayon::prelude::*;
 
 use crate::analysis::DecodedAudio;
 use crate::analysis::envelope::{self, EnvelopeParams};
-use crate::analysis::onset::{self, OnsetParams};
+use crate::analysis::onset::{self, EMPTY_HISTORY, ONSET_SLOTS, OnsetHistory, OnsetParams};
 use crate::analysis::spectrum::{self, SPECTRUM_BINS, Spectrograph};
 use crate::{Error, Result};
 
@@ -92,6 +92,16 @@ pub struct FeatureTimeline {
     /// A five-minute song at 30 fps is 18 MB of this, which is why the *full*
     /// magnitude spectra it is averaged down from never leave [`analyze_with`].
     pub spectra: Vec<f32>,
+    /// The frames a hit landed on, ascending. A hit's position in this list is
+    /// its **ordinal**: the name [`Self::onset_history`] hands a shader so that a
+    /// burst spawned by it can be re-derived on every later frame.
+    ///
+    /// The same information [`Self::is_onset`] reads off the impulse, in the
+    /// order a burst preset needs it. Kept beside the frames rather than scanned
+    /// out of them per frame, because a shader asks for the window once per
+    /// rendered frame and scanning back through a silent song for it is the
+    /// whole song.
+    pub onsets: Vec<usize>,
 }
 
 impl FeatureTimeline {
@@ -165,6 +175,34 @@ impl FeatureTimeline {
     /// struck (`onset::detect`, `only_a_struck_frame_reads_a_full_impulse`).
     pub fn is_onset(&self, frame_index: usize) -> bool {
         self.frame(frame_index).onset >= 1.0
+    }
+
+    /// The [`ONSET_SLOTS`] most recent hits at or before `frame_index`, newest
+    /// first, as the pairs [`OnsetHistory`] describes.
+    ///
+    /// The hit *on* `frame_index` is included, and its birth time is exactly the
+    /// frame's own timestamp: a burst spawned by it starts at age zero on the
+    /// frame the kick lands, not on the one after. Slots past the number of hits
+    /// so far — every slot, for the frames before the first hit — read
+    /// [`NO_ONSET`] and [`NO_ORDINAL`].
+    ///
+    /// Times come from [`Self::timestamp`], so a shader that subtracts a birth
+    /// from the uniform's `time` is subtracting two numbers built by the same
+    /// `frame_index / fps` divide (`AGENTS.md`, determinism).
+    pub fn onset_history(&self, frame_index: usize) -> OnsetHistory {
+        let mut history = EMPTY_HISTORY;
+
+        // The hits are ascending, so the ones at or before this frame are a
+        // prefix, and the newest of them is the last of that prefix.
+        let so_far = self.onsets.partition_point(|&hit| hit <= frame_index);
+        let window = so_far.saturating_sub(ONSET_SLOTS);
+
+        for (slot, ordinal) in history.chunks_exact_mut(2).zip((window..so_far).rev()) {
+            slot[0] = self.timestamp(self.onsets[ordinal]).as_secs_f32();
+            slot[1] = ordinal as f32;
+        }
+
+        history
     }
 }
 
@@ -299,12 +337,18 @@ fn raw_timeline(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
     for (frame, impulse) in frames.iter_mut().zip(onsets.impulse) {
         frame.onset = impulse;
     }
+    let hits: Vec<usize> = onsets
+        .hits
+        .iter()
+        .enumerate()
+        .filter_map(|(index, &hit)| hit.then_some(index))
+        .collect();
 
     tracing::debug!(
         fps,
         frames = frame_count,
         window,
-        onsets = onsets.hits.iter().filter(|&&hit| hit).count(),
+        onsets = hits.len(),
         "built feature timeline"
     );
 
@@ -312,6 +356,7 @@ fn raw_timeline(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
         fps,
         frames,
         spectra: spectrogram,
+        onsets: hits,
     })
 }
 
@@ -1001,6 +1046,140 @@ mod tests {
         assert_eq!(onset_frames(&normalized).len(), 4);
     }
 
+    /// The `onsets` list and the impulse train are two views of one detection.
+    /// A list built from a different threshold, or left behind by a later pass,
+    /// would hand a burst preset hits its flash never fired on.
+    #[test]
+    fn the_onset_list_names_exactly_the_frames_the_impulse_calls_hits() {
+        let mut samples = noise(3.0, 0.005, 31, RATE);
+        for beat in [0.4, 0.9, 1.4, 2.2] {
+            click_at(&mut samples, at(beat, RATE), 0.9);
+        }
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+
+        assert_eq!(timeline.onsets, onset_frames(&timeline));
+        assert_eq!(timeline.onsets.len(), 4);
+    }
+
+    /// The window a burst preset reads: newest hit first, its birth the frame's
+    /// own timestamp, its ordinal its place among the song's hits.
+    #[test]
+    fn the_onset_history_holds_the_recent_hits_newest_first() {
+        let mut samples = noise(3.0, 0.005, 37, RATE);
+        for beat in [0.4, 0.9, 1.4] {
+            click_at(&mut samples, at(beat, RATE), 0.9);
+        }
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let hits = onset_frames(&timeline);
+        assert_eq!(hits.len(), 3, "three clicks, three hits: {hits:?}");
+
+        // A frame after every hit sees all three, newest first.
+        let history = timeline.onset_history(timeline.len() - 1);
+        for (slot, &hit) in (0..3).zip(hits.iter().rev()) {
+            let birth = timeline.timestamp(hit).as_secs_f32();
+            assert_eq!(
+                history[slot * 2],
+                birth,
+                "slot {slot} births at frame {hit}"
+            );
+            assert_eq!(
+                history[slot * 2 + 1],
+                (2 - slot) as f32,
+                "slot {slot} carries the hit's ordinal, not the slot's",
+            );
+        }
+
+        // And the ordinal of a given hit does not move as newer hits arrive.
+        let earlier = timeline.onset_history(hits[1]);
+        assert_eq!(earlier[1], 1.0, "the second hit is ordinal 1, always");
+        assert_eq!(history[3], 1.0, "still ordinal 1 once a third hit lands");
+    }
+
+    /// A hit is visible to the frame it lands on, at age zero: a burst starts on
+    /// the beat rather than on the frame after it.
+    #[test]
+    fn the_hit_frame_itself_sees_its_own_onset_at_age_zero() {
+        let mut samples = noise(3.0, 0.005, 41, RATE);
+        click_at(&mut samples, at(1.0, RATE), 0.9);
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let hit = onset_frames(&timeline)[0];
+
+        let history = timeline.onset_history(hit);
+        assert_eq!(history[0], timeline.timestamp(hit).as_secs_f32());
+        assert_eq!(history[1], 0.0, "the song's first hit is ordinal 0");
+
+        let before = timeline.onset_history(hit - 1);
+        assert_eq!(
+            before[0],
+            onset::NO_ONSET,
+            "the frame before the hit sees nothing"
+        );
+    }
+
+    /// Before the first hit, and for a song with none at all, every slot reads
+    /// the sentinel. A shader that subtracts it from `time` gets an age of a
+    /// thousand seconds and draws nothing, with no emptiness flag to test.
+    #[test]
+    fn a_song_with_no_hits_yet_hands_back_an_empty_history() {
+        let timeline = analyze(&audio(silence(2.0, RATE), RATE), 30).expect("analyzes");
+        assert!(timeline.onsets.is_empty(), "silence does not onset");
+
+        for frame in [0, timeline.len() / 2, timeline.len() - 1] {
+            let history = timeline.onset_history(frame);
+            for slot in 0..ONSET_SLOTS {
+                assert_eq!(
+                    history[slot * 2],
+                    onset::NO_ONSET,
+                    "frame {frame}, slot {slot}"
+                );
+                assert_eq!(history[slot * 2 + 1], onset::NO_ORDINAL);
+            }
+        }
+    }
+
+    /// The window is the last [`ONSET_SLOTS`] hits and no more: an older one is
+    /// dropped off the end rather than pushing the newest out of slot 0.
+    #[test]
+    fn the_history_keeps_the_newest_slots_worth_of_hits_and_drops_the_rest() {
+        let hits: Vec<usize> = (0..ONSET_SLOTS + 5).map(|hit| hit * 3).collect();
+        let timeline = FeatureTimeline {
+            fps: 30,
+            frames: vec![FeatureFrame::default(); 300],
+            spectra: Vec::new(),
+            onsets: hits.clone(),
+        };
+
+        let history = timeline.onset_history(299);
+
+        assert_eq!(history[1], (ONSET_SLOTS + 4) as f32, "the newest is slot 0");
+        assert_eq!(
+            history[(ONSET_SLOTS - 1) * 2 + 1],
+            5.0,
+            "the oldest slot holds the {ONSET_SLOTS}th newest hit",
+        );
+        assert_eq!(
+            history[0],
+            timeline.timestamp(hits[ONSET_SLOTS + 4]).as_secs_f32(),
+        );
+    }
+
+    /// A read past the end clamps, like every other timeline accessor.
+    #[test]
+    fn an_onset_history_lookup_past_the_end_sees_every_hit() {
+        let mut samples = noise(2.0, 0.005, 43, RATE);
+        click_at(&mut samples, at(1.0, RATE), 0.9);
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+
+        assert_eq!(
+            timeline.onset_history(usize::MAX),
+            timeline.onset_history(timeline.len() - 1),
+        );
+    }
+
     /// The acceptance criterion of RFC-001 Step 13, on real decoded audio: every
     /// field the shader reads is a unit-interval float, and none of them is a
     /// `NaN` waiting to paint a frame black.
@@ -1372,6 +1551,7 @@ mod tests {
             fps: 30,
             frames: Vec::new(),
             spectra: Vec::new(),
+            onsets: Vec::new(),
         };
         assert_eq!(empty.spectrum(0), [0.0; SPECTRUM_BINS]);
     }

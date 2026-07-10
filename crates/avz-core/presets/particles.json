@@ -1,0 +1,105 @@
+{
+  "needs_onsets": true,
+  "perf_hint": "every live burst reads `burst_size` particles at every pixel it covers, so frame time scales with `burst_size` times the number of bursts still in the air (`lifetime`) — on software rendering keep `burst_size` at 48 or below, or shorten `lifetime`, and preview with `--sample 10s` before committing to 1080p",
+  "params": [
+    {
+      "name": "burst_size",
+      "type": "int",
+      "default": 40,
+      "min": 1,
+      "max": 256,
+      "slot": [0, 0],
+      "description": "How many particles a single hit throws."
+    },
+    {
+      "name": "lifetime",
+      "type": "float",
+      "default": 1.6,
+      "min": 0.1,
+      "max": 6.0,
+      "slot": [0, 1],
+      "description": "How long a particle burns, in seconds, before it goes out."
+    },
+    {
+      "name": "speed",
+      "type": "float",
+      "default": 0.9,
+      "min": 0.0,
+      "max": 4.0,
+      "slot": [0, 2],
+      "description": "How hard a hit throws its particles."
+    },
+    {
+      "name": "gravity",
+      "type": "float",
+      "default": 0.25,
+      "min": -2.0,
+      "max": 2.0,
+      "slot": [0, 3],
+      "description": "How fast a burst falls; negative makes it rise."
+    },
+    {
+      "name": "drag",
+      "type": "float",
+      "default": 1.4,
+      "min": 0.05,
+      "max": 6.0,
+      "slot": [1, 0],
+      "description": "How quickly a particle loses the speed it was thrown with."
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "default": 0.011,
+      "min": 0.001,
+      "max": 0.06,
+      "slot": [1, 1],
+      "description": "How wide a particle's lit core is, as a fraction of the short edge."
+    },
+    {
+      "name": "glow",
+      "type": "float",
+      "default": 0.7,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [1, 2],
+      "description": "How far the halo around each particle reaches into the frame."
+    },
+    {
+      "name": "sparkle",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [1, 3],
+      "description": "How brightly the highs twinkle the particles still in the air."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [2, 0],
+      "description": "How much light the loudness of the song puts into the bursts."
+    },
+    {
+      "name": "vignette",
+      "type": "float",
+      "default": 0.45,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [2, 1],
+      "description": "How far the corners of the frame fall off."
+    },
+    {
+      "name": "spread",
+      "type": "float",
+      "default": 0.18,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [2, 2],
+      "description": "How far a burst is thrown from the middle of the frame."
+    }
+  ]
+}

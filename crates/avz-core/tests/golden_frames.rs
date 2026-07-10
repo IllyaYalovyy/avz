@@ -39,7 +39,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use avz_core::analysis::{FeatureFrame, SPECTRUM_BINS};
+use avz_core::analysis::{EMPTY_HISTORY, FeatureFrame, ONSET_SLOTS, SPECTRUM_BINS};
 use avz_core::config::{self, Palette};
 use avz_core::render::{
     AdapterChoice, BUILT_INS, Backdrop, Card, CardText, Compositor, Globals, Gpu, Layer,
@@ -186,6 +186,42 @@ fn silent_spectrum() -> Vec<f32> {
     vec![0.0; SPECTRUM_BINS]
 }
 
+/// How often the golden song is struck: every twelfth frame, from the first.
+///
+/// 0.4 s apart at 30 fps — a brisk backbeat, and slower than the 1.6 s a
+/// `particles` burst lives, so a golden frame well into the song has several
+/// bursts on it at different ages rather than one.
+const GOLDEN_ONSET_EVERY: usize = 12;
+
+/// The recent hits of golden frame `frame_index`, built by hand.
+///
+/// Written down rather than detected, for the reason [`synthetic_frame`] is: a
+/// change in the onset detector must not silently rewrite the picture a burst
+/// preset is held to. The rule is closed-form in `frame_index`, so a preset drawn
+/// at frame 100 alone sees exactly the window it would have seen had frames
+/// 0..99 been drawn first.
+///
+/// Frame 0 is a hit, which is what makes `synthetic_frame(0)`'s full onset
+/// impulse and this agree with one another.
+fn synthetic_onsets(frame_index: usize) -> Vec<f32> {
+    let hits: Vec<usize> = (0..=frame_index).step_by(GOLDEN_ONSET_EVERY).collect();
+
+    let mut history = EMPTY_HISTORY;
+    let ordinals = hits.len().saturating_sub(ONSET_SLOTS)..hits.len();
+    for (slot, ordinal) in history.chunks_exact_mut(2).zip(ordinals.rev()) {
+        // The same `frame_index / fps` divide `Globals::for_frame` makes, so a
+        // shader subtracting a birth from `time` subtracts two exact siblings.
+        slot[0] = (hits[ordinal] as f64 / f64::from(FPS)) as f32;
+        slot[1] = ordinal as f32;
+    }
+    history.to_vec()
+}
+
+/// A history with no hits in it, for the frames drawn from silent features.
+fn silent_onsets() -> Vec<f32> {
+    EMPTY_HISTORY.to_vec()
+}
+
 /// A preset's parameters at the defaults its schema declares.
 ///
 /// The golden hashes are hashes of a *default* render, which is what makes
@@ -246,8 +282,9 @@ impl Stage {
         }
     }
 
-    fn draw(&self, gpu: &Gpu, globals: &Globals, spectrum: &[f32]) {
-        self.visualizer.draw(gpu, &self.visual, globals, spectrum);
+    fn draw(&self, gpu: &Gpu, globals: &Globals, spectrum: &[f32], onsets: &[f32]) {
+        self.visualizer
+            .draw(gpu, &self.visual, globals, spectrum, onsets);
     }
 
     /// Composite the stack and read the frame back, tightly packed.
@@ -312,7 +349,12 @@ fn render_hash_on(
             colors,
             params,
         );
-        stage.draw(&gpu, &globals, &synthetic_spectrum(index));
+        stage.draw(
+            &gpu,
+            &globals,
+            &synthetic_spectrum(index),
+            &synthetic_onsets(index),
+        );
     }
     let pixels = stage.read(&gpu);
 
@@ -711,7 +753,12 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
             ember(),
             params,
         );
-        stage.draw(&gpu, &globals, &synthetic_spectrum(10));
+        stage.draw(
+            &gpu,
+            &globals,
+            &synthetic_spectrum(10),
+            &synthetic_onsets(10),
+        );
         hex(&stage.read(&gpu))
     };
 
@@ -763,7 +810,7 @@ fn every_preset_draws_a_layer_the_backdrop_shows_through() {
             ember(),
             defaults(preset),
         );
-        stage.draw(&gpu, &globals, &silent_spectrum());
+        stage.draw(&gpu, &globals, &silent_spectrum(), &silent_onsets());
         let pixels = stage.read(&gpu);
 
         let opaque = pixels.chunks_exact(4).filter(|px| px[3] == 255).count();
@@ -811,7 +858,12 @@ fn nebula_frames_depend_on_the_frames_before_them() {
             ember(),
             defaults(nebula),
         );
-        stage.draw(&gpu, &globals, &synthetic_spectrum(FRAME));
+        stage.draw(
+            &gpu,
+            &globals,
+            &synthetic_spectrum(FRAME),
+            &synthetic_onsets(FRAME),
+        );
         hex(&stage.read(&gpu))
     };
 
@@ -849,7 +901,12 @@ fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
             ember(),
             defaults(nebula),
         );
-        stage.draw(&gpu, &globals, &synthetic_spectrum(index));
+        stage.draw(
+            &gpu,
+            &globals,
+            &synthetic_spectrum(index),
+            &synthetic_onsets(index),
+        );
     }
     let pixels = stage.read(&gpu);
 
@@ -899,7 +956,7 @@ fn ribbon_light(spectrum: &[f32]) -> Vec<u8> {
         ember(),
         defaults(ribbons),
     );
-    stage.draw(&gpu, &globals, spectrum);
+    stage.draw(&gpu, &globals, spectrum, &synthetic_onsets(FRAME));
 
     stage.read(&gpu)
 }
@@ -989,6 +1046,433 @@ fn ribbons_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
     assert!(
         white * 4 < total,
         "{white} of {total} pixels are pure white: the ribbons blew out",
+    );
+}
+
+/// Whether `preset` re-simulates from the song's recent hits.
+fn needs_onsets(preset: &Preset) -> bool {
+    preset
+        .schema()
+        .expect("the shipped schema parses")
+        .needs_onsets
+}
+
+/// One frame of `particles` over no backdrop, drawn at `frame_index` from the
+/// history given. What comes back is the preset's own light.
+///
+/// Loud, sustained features, so the picture is the bursts and not the loudness
+/// envelope: `synthetic_frame` reserves those for frames past 10.
+fn particle_light(frame_index: usize, onsets: &[f32]) -> Vec<u8> {
+    let particles = Preset::by_name("particles").expect("particles ships");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, particles, ember(), None);
+    let globals = Globals::for_frame(
+        frame_index,
+        FPS,
+        (WIDTH, HEIGHT),
+        GOLDEN_SEED,
+        synthetic_frame(100),
+        ember(),
+        defaults(particles),
+    );
+    stage.draw(&gpu, &globals, &silent_spectrum(), onsets);
+
+    stage.read(&gpu)
+}
+
+/// [`particle_light`], with some of `particles`' parameters moved off their
+/// defaults.
+fn particle_light_with(frame_index: usize, onsets: &[f32], overrides: &[(&str, f64)]) -> Vec<u8> {
+    let particles = Preset::by_name("particles").expect("particles ships");
+
+    let mut table = toml::Table::new();
+    for (name, value) in overrides {
+        table.insert((*name).to_owned(), toml::Value::Float(*value));
+    }
+    let params = particles
+        .schema()
+        .expect("the shipped schema parses")
+        .resolve(&table)
+        .expect("the overrides are in range");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, particles, ember(), None);
+    let globals = Globals::for_frame(
+        frame_index,
+        FPS,
+        (WIDTH, HEIGHT),
+        GOLDEN_SEED,
+        synthetic_frame(100),
+        ember(),
+        params,
+    );
+    stage.draw(&gpu, &globals, &silent_spectrum(), onsets);
+
+    stage.read(&gpu)
+}
+
+/// A history holding one hit, born `age` seconds before frame `frame_index`.
+fn one_hit(frame_index: usize, age: f32) -> Vec<f32> {
+    let time = (frame_index as f64 / f64::from(FPS)) as f32;
+
+    let mut history = EMPTY_HISTORY;
+    history[0] = time - age;
+    history[1] = 0.0;
+    history.to_vec()
+}
+
+/// How far the lit pixels of `frame` reach from its center, and how many of them
+/// there are. Distances are in the shader's own units: the short edge is 1.0.
+fn lit_spread(frame: &[u8]) -> (f32, usize) {
+    let (width, height) = (WIDTH as f32, HEIGHT as f32);
+    let short = width.min(height);
+
+    let mut farthest: f32 = 0.0;
+    let mut lit = 0;
+
+    for (index, pixel) in frame.chunks_exact(4).enumerate() {
+        if pixel[..3] == [0, 0, 0] {
+            continue;
+        }
+        lit += 1;
+        let x = (index % WIDTH as usize) as f32 - 0.5 * width;
+        let y = (index / WIDTH as usize) as f32 - 0.5 * height;
+        farthest = farthest.max((x * x + y * y).sqrt() / short);
+    }
+
+    (farthest, lit)
+}
+
+/// `particles` reads the onset history, and reads it as *time*: a burst thrown
+/// by a hit expands away from where it was thrown as the hit recedes.
+///
+/// The plumbing is proven in `onset_history_texture.rs` against a shader that
+/// does nothing else. This proves the shipped preset is wired to it, and wired
+/// the right way round. Nothing else in this file would notice a `particles`
+/// that dropped its `textureLoad` and drew a still cloud — its golden hashes
+/// would simply be blessed without the music in them.
+#[test]
+fn particles_throws_a_burst_that_expands_as_the_hit_that_threw_it_recedes() {
+    let particles = Preset::by_name("particles").expect("particles ships");
+    assert!(needs_onsets(particles), "particles asks for the hits");
+
+    const FRAME: usize = 60;
+    let (fresh, _) = lit_spread(&particle_light(FRAME, &one_hit(FRAME, 0.0)));
+    let (young, _) = lit_spread(&particle_light(FRAME, &one_hit(FRAME, 0.25)));
+    let (older, _) = lit_spread(&particle_light(FRAME, &one_hit(FRAME, 0.9)));
+
+    assert!(
+        young > fresh,
+        "a burst 0.25 s old reaches {young:.3} from the center and a brand new one \
+         {fresh:.3}: the particles are not moving",
+    );
+    assert!(
+        older > young,
+        "a burst 0.9 s old reaches {older:.3} and a 0.25 s one {young:.3}: the \
+         burst stops expanding",
+    );
+}
+
+/// A burst older than `lifetime` has gone out, and a frame no hit has reached
+/// yet was never lit. Both are the same assertion about the sentinel: a shader
+/// that read an unfilled slot as a hit at time zero would open every render with
+/// an explosion the song never played.
+#[test]
+fn particles_draws_nothing_without_a_live_hit() {
+    const FRAME: usize = 60;
+
+    let lifetime = match defaults(Preset::by_name("particles").expect("particles ships"))[0][1] {
+        seconds if seconds > 0.0 => seconds,
+        other => panic!("`lifetime` defaults to {other}"),
+    };
+
+    let empty = particle_light(FRAME, &silent_onsets());
+    assert!(
+        empty.chunks_exact(4).all(|pixel| pixel[..3] == [0, 0, 0]),
+        "particles drew light on a frame no hit has reached yet",
+    );
+
+    let burnt = particle_light(FRAME, &one_hit(FRAME, lifetime + 0.1));
+    assert!(
+        burnt.chunks_exact(4).all(|pixel| pixel[..3] == [0, 0, 0]),
+        "a burst older than its {lifetime} s lifetime is still burning",
+    );
+
+    // And the live burst the two are being compared against does draw, so the
+    // assertions above are not passing on a preset that draws nothing at all.
+    let (_, lit) = lit_spread(&particle_light(FRAME, &one_hit(FRAME, 0.3)));
+    assert!(lit > 0, "particles never draws anything");
+}
+
+/// The brightest pixel of `frame` in each of `buckets` rings out to `limit`,
+/// measured from the center in the shader's units: the short edge is 1.0.
+fn brightest_by_radius(frame: &[u8], buckets: usize, limit: f32) -> Vec<u8> {
+    let (width, height) = (WIDTH as f32, HEIGHT as f32);
+    let short = width.min(height);
+
+    let mut profile = vec![0u8; buckets];
+    for (index, pixel) in frame.chunks_exact(4).enumerate() {
+        let x = (index % WIDTH as usize) as f32 - 0.5 * width;
+        let y = (index / WIDTH as usize) as f32 - 0.5 * height;
+        let radius = (x * x + y * y).sqrt() / short;
+        if radius >= limit {
+            continue;
+        }
+
+        let ring = (radius / limit * buckets as f32) as usize;
+        let light = pixel[..3].iter().copied().max().unwrap_or(0);
+        profile[ring.min(buckets - 1)] = profile[ring.min(buckets - 1)].max(light);
+    }
+
+    profile
+}
+
+/// The burst cull is an optimization, and an optimization may not change the
+/// picture.
+///
+/// `particles` skips a whole burst when the pixel it is shading lies outside the
+/// shell between the burst's slowest and fastest particle, widened by how far a
+/// particle's halo reaches. Widened by too little, the cull shaves the halo off
+/// both faces of the shell — a burst with a hard edge and a hollow middle, and
+/// every other test here still passes: it expands, it fades, it twinkles, and
+/// its golden hashes are blessed with the clipping baked in.
+///
+/// The halo falls to zero smoothly, so the picture must too. A ring of pixels
+/// that is dark while the ring beside it is bright is a cut, not a falloff.
+/// `spread` and `gravity` are turned off so the burst sits on the frame's center
+/// and its rings are the shader's own falloff and nothing else.
+#[test]
+fn the_burst_cull_takes_no_light_off_the_burst_it_skips() {
+    const FRAME: usize = 60;
+    const BUCKETS: usize = 48;
+    const LIMIT: f32 = 0.5;
+
+    /// A ring this bright cannot sit next to a ring with no light at all.
+    const BRIGHT: u8 = 40;
+
+    let frame = particle_light_with(
+        FRAME,
+        &one_hit(FRAME, 0.4),
+        &[("spread", 0.0), ("gravity", 0.0)],
+    );
+    let profile = brightest_by_radius(&frame, BUCKETS, LIMIT);
+
+    assert!(
+        profile.iter().any(|&light| light > 200),
+        "no ring of the burst is lit at all: {profile:?}",
+    );
+
+    for (ring, pair) in profile.windows(2).enumerate() {
+        let [inner, outer] = [pair[0], pair[1]];
+        assert!(
+            !(inner == 0 && outer > BRIGHT || inner > BRIGHT && outer == 0),
+            "ring {ring} reads {inner} and ring {} reads {outer}: the burst has a \
+             hard edge where its halo should fade. The cull's `reach` is narrower \
+             than a particle's glow, so it is skipping bursts that still light \
+             this pixel.\nprofile: {profile:?}",
+            ring + 1,
+        );
+    }
+}
+
+/// A burst at age zero has thrown nothing anywhere yet: every particle is still
+/// at the origin, and what the frame shows is the disc their overlapping glows
+/// make. A cull that only admits pixels *on* the burst's shell would leave that
+/// disc a single pixel wide, and the expansion test above would not notice —
+/// a one-pixel burst still expands.
+#[test]
+fn a_burst_lights_a_disc_on_the_frame_it_is_thrown() {
+    const FRAME: usize = 60;
+
+    let (_, lit) = lit_spread(&particle_light(FRAME, &one_hit(FRAME, 0.0)));
+
+    assert!(
+        lit > 100,
+        "a brand new burst lit {lit} pixels: its particles are all at the origin, \
+         and their glow should cover a disc around it",
+    );
+}
+
+/// Where the light of `frame` falls farther than `radius` from the center, in
+/// the shader's own units: the short edge is 1.0.
+fn light_beyond(frame: &[u8], radius: f32) -> Vec<[u8; 3]> {
+    let (width, height) = (WIDTH as f32, HEIGHT as f32);
+    let short = width.min(height);
+
+    frame
+        .chunks_exact(4)
+        .enumerate()
+        .filter(|(index, _)| {
+            let x = (index % WIDTH as usize) as f32 - 0.5 * width;
+            let y = (index / WIDTH as usize) as f32 - 0.5 * height;
+            (x * x + y * y).sqrt() / short > radius
+        })
+        .map(|(_, pixel)| [pixel[0], pixel[1], pixel[2]])
+        .collect()
+}
+
+/// A burst is bound to the *hit* that threw it, not to the slot the hit happens
+/// to occupy this frame.
+///
+/// A slot is a place in a sliding window: the 0.3 s-old burst below sits in slot
+/// 0 until a new hit lands, and in slot 1 afterwards. Every particle's direction,
+/// speed, and color is a seeded hash, and a `particles` that hashed the slot
+/// would tear all of them across the frame on every kick — a shimmer nobody would
+/// read as a bug, and one no golden hash would catch, because both frames would
+/// be blessed. Hashing the hit's ordinal is what makes a burst hold still.
+///
+/// The new hit is at age zero, so its own light is a blob at the origin: outside
+/// `RADIUS` nothing of it can reach, and the older burst's light there must be
+/// the same to the byte.
+#[test]
+fn a_burst_is_hashed_from_the_hit_that_threw_it_and_not_from_its_slot() {
+    const FRAME: usize = 60;
+
+    /// Past the reach of a brand-new burst — its origin jitter plus its halo —
+    /// and well inside the 0.3 s-old burst that both frames share.
+    const RADIUS: f32 = 0.15;
+
+    let time = (FRAME as f64 / f64::from(FPS)) as f32;
+    let older = (time - 0.3, 5.0);
+
+    let mut alone = EMPTY_HISTORY;
+    alone[0] = older.0;
+    alone[1] = older.1;
+
+    // The same hit, one slot back, with a fresh one in front of it.
+    let mut after = EMPTY_HISTORY;
+    after[0] = time;
+    after[1] = 6.0;
+    after[2] = older.0;
+    after[3] = older.1;
+
+    let before = particle_light(FRAME, &alone);
+    let shifted = particle_light(FRAME, &after);
+
+    let lit = light_beyond(&before, RADIUS)
+        .iter()
+        .filter(|pixel| **pixel != [0, 0, 0])
+        .count();
+    assert!(lit > 0, "the older burst reaches nothing beyond {RADIUS}");
+
+    assert_eq!(
+        light_beyond(&before, RADIUS),
+        light_beyond(&shifted, RADIUS),
+        "a new hit moved the burst that was already in the air: its particles are \
+         hashed from the slot it sits in rather than from the hit that threw it",
+    );
+}
+
+/// The whole reason the hits are re-simulated rather than integrated: frame `N`
+/// is a pure function of frame `N`'s inputs. A `particles` that carried state
+/// between draws would render frame 100 differently depending on whether frames
+/// 0..99 came first — and `--sample 1:00..1:03` would render a different video
+/// than the same seconds of a full render.
+#[test]
+fn particles_renders_a_frame_the_same_whether_or_not_the_frames_before_it_were_drawn() {
+    let particles = Preset::by_name("particles").expect("particles ships");
+    const FRAME: usize = 100;
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, particles, ember(), Some(Backdrop::default()));
+
+    let draw = |index: usize| {
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            synthetic_frame(index),
+            ember(),
+            defaults(particles),
+        );
+        stage.draw(&gpu, &globals, &silent_spectrum(), &synthetic_onsets(index));
+    };
+
+    draw(FRAME);
+    let cold = hex(&stage.read(&gpu));
+
+    for index in 0..=FRAME {
+        draw(index);
+    }
+    let warm = hex(&stage.read(&gpu));
+
+    assert_eq!(
+        cold, warm,
+        "particles renders frame {FRAME} differently once the frames before it \
+         have been drawn: something is being carried between draws",
+    );
+}
+
+/// The highs twinkle the particles still in the air (`VISION.md` §6). Nothing
+/// else here would notice a `sparkle` wired to a feature the preset does not
+/// claim to react to.
+#[test]
+fn the_highs_twinkle_the_particles_particles_still_has_in_the_air() {
+    let particles = Preset::by_name("particles").expect("particles ships");
+    const FRAME: usize = 60;
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, particles, ember(), None);
+
+    let draw = |high_env: f32| {
+        let features = FeatureFrame {
+            rms_env: 0.9,
+            high_env,
+            centroid: 0.4,
+            ..FeatureFrame::default()
+        };
+        let globals = Globals::for_frame(
+            FRAME,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            features,
+            ember(),
+            defaults(particles),
+        );
+        stage.draw(&gpu, &globals, &silent_spectrum(), &one_hit(FRAME, 0.3));
+        hex(&stage.read(&gpu))
+    };
+
+    assert_ne!(
+        draw(0.0),
+        draw(1.0),
+        "a cymbal-heavy frame and a dull one twinkle the same burst identically",
+    );
+}
+
+/// `--sample 3s --adapter software` must produce stable, non-black, evolving
+/// output, as for `nebula` and `ribbons`: that the frame is *lit* without
+/// blowing out. A burst is sparse by nature, so the bar for "lit" is a hundredth
+/// of the frame rather than the tenth those two are held to.
+#[test]
+fn particles_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
+    const FRAME: usize = 100;
+    let frame = particle_light(FRAME, &synthetic_onsets(FRAME));
+
+    let lit = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] != [0, 0, 0])
+        .count();
+    let white = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] == [255, 255, 255])
+        .count();
+    let total = (WIDTH * HEIGHT) as usize;
+
+    assert!(
+        lit * 100 > total,
+        "only {lit} of {total} pixels are lit: particles renders black",
+    );
+    assert!(
+        white * 4 < total,
+        "{white} of {total} pixels are pure white: the bursts blew out",
     );
 }
 
@@ -1241,7 +1725,12 @@ fn dump_pulse_tuning_frames() {
             ember(),
             params,
         );
-        stage.draw(&gpu, &globals, &synthetic_spectrum(10));
+        stage.draw(
+            &gpu,
+            &globals,
+            &synthetic_spectrum(10),
+            &synthetic_onsets(10),
+        );
         let pixels = stage.read(&gpu);
 
         let path = out.join(format!("{name}.png"));
@@ -1307,7 +1796,13 @@ fn dump_nebula_tuning_frames() {
             ember(),
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals, &synthetic_spectrum(index));
+        visualizer.draw(
+            &gpu,
+            &visual,
+            &globals,
+            &synthetic_spectrum(index),
+            &synthetic_onsets(index),
+        );
 
         if !KEPT.contains(&index) {
             continue;
@@ -1364,7 +1859,93 @@ fn dump_ribbons_tuning_frames() {
             ember(),
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals, &synthetic_spectrum(index));
+        visualizer.draw(
+            &gpu,
+            &visual,
+            &globals,
+            &synthetic_spectrum(index),
+            &synthetic_onsets(index),
+        );
+
+        compositor.composite(&gpu, &target);
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+        let path = out.join(format!("{index:03}.png"));
+        image::RgbaImage::from_raw(WIDE, TALL, pixels)
+            .expect("the frame is WIDE x TALL RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+}
+
+/// The same instrument for `particles`, in `target/particles-tuning/`.
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_particles
+/// ```
+///
+/// A hash says the bursts did not change; it does not say they read as bursts.
+/// A burst preset also cannot be judged from one frame — what it is *for* is the
+/// arc between the hit and the last spark going out — so this dumps the frames
+/// around and after two hits half a second apart: the throw, the spread, the
+/// fall, and the frame after the second hit lands on top of the first burst.
+///
+/// The features are a dense passage with a hit on frames 0 and 15, so `high_env`
+/// is up and the twinkle is on screen.
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual tuning pass; asserts nothing"]
+fn dump_particles_tuning_frames() {
+    const WIDE: u32 = 960;
+    const TALL: u32 = 540;
+    const HITS: [usize; 2] = [0, 15];
+    const KEPT: [usize; 6] = [0, 4, 12, 15, 24, 44];
+
+    let preset = Preset::by_name("particles").expect("particles ships");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/particles-tuning");
+    fs::create_dir_all(&out).expect("create target/particles-tuning");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
+    let background = Backdrop::default().layer(&gpu, WIDE, TALL, ember());
+    let visual = Layer::new(&gpu, WIDE, TALL, "visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual).expect("particles compiles");
+    let compositor = Compositor::new(&gpu, &[&background, &visual]).expect("two 960x540 layers");
+
+    // The window the shipped preset sees: the hits at or before this frame,
+    // newest first, exactly as `FeatureTimeline::onset_history` builds it.
+    let history = |index: usize| {
+        let mut row = EMPTY_HISTORY;
+        let landed: Vec<usize> = HITS.iter().copied().filter(|&hit| hit <= index).collect();
+        for (slot, ordinal) in row.chunks_exact_mut(2).zip((0..landed.len()).rev()) {
+            slot[0] = (landed[ordinal] as f64 / f64::from(FPS)) as f32;
+            slot[1] = ordinal as f32;
+        }
+        row.to_vec()
+    };
+
+    let params = defaults(preset);
+    for index in KEPT {
+        let features = FeatureFrame {
+            rms_env: 0.85,
+            high_env: 0.7,
+            centroid: 0.45,
+            flux: 0.2,
+            onset: f32::from(HITS.contains(&index)),
+            ..FeatureFrame::default()
+        };
+
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDE, TALL),
+            GOLDEN_SEED,
+            features,
+            ember(),
+            params,
+        );
+        visualizer.draw(&gpu, &visual, &globals, &silent_spectrum(), &history(index));
 
         compositor.composite(&gpu, &target);
         let pixels = target.read_rgba(&gpu).expect("the frame reads back");

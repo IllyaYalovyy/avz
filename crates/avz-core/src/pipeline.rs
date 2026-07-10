@@ -7,9 +7,10 @@
 //! The visualizer is the preset `config.visual.preset` names, drawn against the
 //! `VISION.md` §6 uniform contract. Almost everything a preset sees comes from
 //! [`Globals`]: the palette, the frame's features, and `frame_index / fps` as
-//! the only clock. The exceptions are the two optional textures — the previous
-//! frame, which the renderer keeps for itself, and this frame's coarse spectrum,
-//! which comes from the timeline beside its features.
+//! the only clock. The exceptions are the three optional textures — the previous
+//! frame, which the renderer keeps for itself, and this frame's coarse spectrum
+//! and the song's recent hits, both of which come from the timeline beside its
+//! features.
 //!
 //! Each frame is a layer stack flattened by the [`Compositor`]: the background —
 //! the palette backdrop, with `background.image` fitted over it — the
@@ -192,7 +193,13 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
             palette,
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals, timeline.spectrum(index));
+        visualizer.draw(
+            &gpu,
+            &visual,
+            &globals,
+            timeline.spectrum(index),
+            &timeline.onset_history(index),
+        );
         // The card was rasterized once; all that moves is the quad's opacity and
         // its offset (`VISION.md` §5.3).
         if let Some((card, layer)) = &text {

@@ -57,6 +57,62 @@ pub const DEFAULT_DECAY: Duration = Duration::from_millis(150);
 /// a click at a tenth of full scale reaches 0.51.
 pub const DEFAULT_NOISE_FLOOR: f32 = 0.05;
 
+/// How many past hits a preset can see at once
+/// ([`FeatureTimeline::onset_history`](crate::analysis::FeatureTimeline::onset_history)).
+///
+/// The uniform's `onset` is one number about *this* frame, which is enough to
+/// flash on the beat and nothing more. A preset that spawns something on a hit
+/// and then lets it live — a particle burst, an expanding ring — must know when
+/// the hits it is still drawing happened, because a fragment shader carries no
+/// state between frames and re-derives the whole picture from scratch every
+/// time.
+///
+/// 64 is generous on purpose. [`DEFAULT_REFRACTORY`] caps hits at ten a second,
+/// so 64 slots hold at least the last 6.4 seconds of them — longer than any
+/// lifetime a burst preset has business animating, and long enough that the
+/// window never becomes the thing a preset author has to reason about.
+pub const ONSET_SLOTS: usize = 64;
+
+/// The birth time an unfilled [`ONSET_SLOTS`] slot carries.
+///
+/// A slot is empty at the start of a song, before enough hits have landed to
+/// fill the window. Rather than a flag a shader has to test, the slot reports a
+/// hit a thousand seconds before the song began: every age computed from it is
+/// enormous, so every lifetime test a preset already writes rejects it. Not
+/// `-inf`, which would make `time - birth` an infinity that `min`, `clamp`, and
+/// `exp` each round differently on different drivers.
+pub const NO_ONSET: f32 = -1000.0;
+
+/// The ordinal an unfilled [`ONSET_SLOTS`] slot carries: no hit has this index.
+pub const NO_ORDINAL: f32 = -1.0;
+
+/// The recent-hit window a preset reads, as the renderer uploads it.
+///
+/// One `(birth, ordinal)` pair per slot, newest first: `[0]` and `[1]` are the
+/// most recent hit's timestamp in seconds and its 0-based index in the song's
+/// hits, `[2]` and `[3]` the hit before it, and so on. Unfilled slots hold
+/// [`NO_ONSET`] and [`NO_ORDINAL`].
+///
+/// **Why the ordinal is in here.** A slot is a position in a sliding window, so
+/// slot 3 names a different hit on the frame after a new one lands. A preset
+/// that hashed the slot index would tear every particle of every live burst
+/// across to a new position on every hit. The ordinal names the hit itself and
+/// never moves, so it is what a burst's seeded hashes key on.
+pub type OnsetHistory = [f32; ONSET_SLOTS * 2];
+
+/// The window a song hands a preset before its first hit lands: every slot
+/// empty. Also what the renderer fills the texture with before the first upload.
+pub const EMPTY_HISTORY: OnsetHistory = {
+    let mut history = [0.0; ONSET_SLOTS * 2];
+    let mut slot = 0;
+    while slot < ONSET_SLOTS {
+        history[slot * 2] = NO_ONSET;
+        history[slot * 2 + 1] = NO_ORDINAL;
+        slot += 1;
+    }
+    history
+};
+
 /// The knobs of [`detect`]. Constants now; RFC-001 M3 plumbs them to config.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct OnsetParams {

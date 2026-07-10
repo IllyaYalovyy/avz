@@ -22,5 +22,7 @@ pub mod spectrum;
 pub use decode::{DecodedAudio, decode};
 pub use envelope::EnvelopeParams;
 pub use features::{FeatureFrame, FeatureTimeline, analyze, analyze_with};
-pub use onset::{OnsetParams, Onsets};
+pub use onset::{
+    EMPTY_HISTORY, NO_ONSET, NO_ORDINAL, ONSET_SLOTS, OnsetHistory, OnsetParams, Onsets,
+};
 pub use spectrum::{BAND_COUNT, BAND_EDGES, SPECTRUM_BINS, SPECTRUM_RANGE_HZ};

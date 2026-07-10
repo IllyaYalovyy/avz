@@ -34,4 +34,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("ribbons.wgsl"),
         schema: include_str!("ribbons.json"),
     },
+    Preset {
+        name: "particles",
+        description: "energetic: every hit throws a burst of sparks the highs make twinkle",
+        source: include_str!("particles.wgsl"),
+        schema: include_str!("particles.json"),
+    },
 ];

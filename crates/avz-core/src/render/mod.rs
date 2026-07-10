@@ -13,9 +13,10 @@
 //! paint for themselves. The [`TextCard`] on top of it is rasterized once and
 //! then only animated.
 //!
-//! A preset draws against the uniform and, if its schema asks, against the two
+//! A preset draws against the uniform and, if its schema asks, against the three
 //! optional textures `VISION.md` §6 allows it: the previous frame
-//! ([`Feedback`]) and this frame's coarse spectrum ([`Spectrum`]).
+//! ([`Feedback`]), this frame's coarse spectrum ([`Spectrum`]), and the song's
+//! recent hits ([`OnsetHistory`]).
 //!
 //! Animation time is always `frame_index / fps`, never wall clock. Readback
 //! row-padding (256-byte alignment) is handled in exactly one place:
@@ -30,6 +31,7 @@ pub mod feedback;
 pub mod globals;
 pub mod layer;
 pub mod offscreen;
+pub mod onsets;
 pub mod palette;
 pub mod preset;
 pub mod readback;
@@ -44,6 +46,7 @@ pub use feedback::Feedback;
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
 pub use layer::Layer;
 pub use offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+pub use onsets::OnsetHistory;
 pub use palette::{BUILT_INS, BuiltIn, LinearPalette};
 pub use preset::{PRESETS, Preset, Visualizer};
 pub use readback::RowLayout;

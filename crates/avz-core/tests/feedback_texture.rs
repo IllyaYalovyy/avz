@@ -141,7 +141,7 @@ fn render_sequence(preset: &Preset, frames: usize) -> Vec<u8> {
             colors,
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals, &[]);
+        visualizer.draw(&gpu, &visual, &globals, &[], &[]);
     }
     compositor.composite(&gpu, &target);
 
