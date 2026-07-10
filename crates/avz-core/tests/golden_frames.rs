@@ -2847,3 +2847,119 @@ fn dump_ink_tuning_frames() {
             .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }
 }
+
+/// The panel presets (#31, #32): a visualization that lives in one anchored
+/// rectangle and leaves the rest of the frame to the backdrop.
+const PANEL_PRESETS: &[&str] = &["bars"];
+
+/// The pixel rectangle a panel preset's defaults claim, from the same
+/// arithmetic the shader does: fractions of the frame for the size, a fraction
+/// of the short edge for the margin, anchored bottom-left.
+fn default_panel_rect(width: f32, height: f32, margin: f32) -> (u32, u32, u32, u32) {
+    let panel_w = width * WIDTH as f32;
+    let panel_h = height * HEIGHT as f32;
+    let m = margin * WIDTH.min(HEIGHT) as f32;
+
+    let x0 = m;
+    let y1 = HEIGHT as f32 - m;
+    (
+        x0 as u32,
+        (y1 - panel_h) as u32,
+        (x0 + panel_w) as u32,
+        y1 as u32,
+    )
+}
+
+/// A panel preset owns its rectangle and nothing else (#31, #32): on a loud
+/// frame, every pixel outside the panel is *exactly* the pixel a silent render
+/// leaves — which is what lets a background image or video show through
+/// untouched — and the panel itself is visibly lit.
+#[test]
+fn a_panel_preset_lights_only_its_panel() {
+    for name in PANEL_PRESETS {
+        let preset = PRESETS
+            .iter()
+            .find(|preset| preset.name == *name)
+            .unwrap_or_else(|| panic!("`{name}` ships"));
+
+        let _device = one_device_at_a_time();
+        let gpu = Gpu::new(AdapterChoice::Software)
+            .expect("panel tests need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
+        let stage = Stage::new(&gpu, preset, ember(), Some(Backdrop::default()));
+        let params = defaults(preset);
+
+        // Silence first: zero features and an empty spectrum must leave the
+        // backdrop alone everywhere, panel included.
+        let silent = Globals::for_frame(
+            10,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            FeatureFrame::default(),
+            ember(),
+            params,
+        );
+        stage.draw(&gpu, &silent, &silent_spectrum(), &silent_onsets());
+        let backdrop_only = stage.read(&gpu);
+
+        // Then the loud golden frame 10, a kick under a cymbal.
+        let loud = Globals::for_frame(
+            10,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            synthetic_frame(10),
+            ember(),
+            params,
+        );
+        stage.draw(&gpu, &loud, &synthetic_spectrum(10), &synthetic_onsets(10));
+        let lit = stage.read(&gpu);
+
+        // The schema's own defaults decide where the panel is. Two pixels of
+        // slack absorb the panel's edge falling between texels.
+        let schema = preset.schema().expect("the shipped schema parses");
+        let default_of = |param: &str| -> f32 {
+            let found = schema
+                .params
+                .iter()
+                .find(|p| p.name == param)
+                .unwrap_or_else(|| panic!("`{name}` declares `{param}`"));
+            match found.kind {
+                ParamKind::Float { default, .. } => default,
+                ref other => panic!("`{param}` is {}, expected float", other.type_name()),
+            }
+        };
+        let (x0, y0, x1, y1) = default_panel_rect(
+            default_of("width"),
+            default_of("height"),
+            default_of("margin"),
+        );
+        const SLACK: u32 = 2;
+
+        let mut inside_changed = 0u32;
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                let at = ((y * WIDTH + x) * 4) as usize;
+                let (was, now) = (&backdrop_only[at..at + 4], &lit[at..at + 4]);
+
+                let outside = x + SLACK < x0 || x > x1 + SLACK || y + SLACK < y0 || y > y1 + SLACK;
+                if outside {
+                    assert_eq!(
+                        was, now,
+                        "`{name}` painted outside its panel at ({x}, {y}): \
+                         rect is ({x0}, {y0})..({x1}, {y1})"
+                    );
+                } else if was != now {
+                    inside_changed += 1;
+                }
+            }
+        }
+
+        let panel_area = (x1 - x0) * (y1 - y0);
+        assert!(
+            inside_changed * 10 >= panel_area,
+            "`{name}` barely lit its own panel on a loud frame: \
+             {inside_changed} of {panel_area} pixels changed"
+        );
+    }
+}
