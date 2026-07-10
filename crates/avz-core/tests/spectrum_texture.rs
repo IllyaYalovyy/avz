@@ -169,7 +169,7 @@ fn render_sequence(preset: &Preset, spectra: &[Vec<f32>]) -> Vec<u8> {
             colors,
             params,
         );
-        visualizer.draw(&gpu, &visual, &globals, spectrum);
+        visualizer.draw(&gpu, &visual, &globals, spectrum, &[]);
     }
     compositor.composite(&gpu, &target);
 

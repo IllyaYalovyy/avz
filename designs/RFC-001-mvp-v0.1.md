@@ -38,10 +38,25 @@ developed test-first per `docs/TESTING.md`.
 - **NG1** - The four remaining v1 presets (`ribbons`, `particles`, `kaleido`,
   `ink`) and the spectrum texture binding only `ribbons` consumes. Tracked as
   backlog issues; adding them later must not require core changes (that is G3).
-  **Partly landed post-MVP (issue #24):** the spectrum texture binding and
-  `ribbons`. The binding was core work, as this non-goal anticipated — it is the
-  last generic binding planned — and `ribbons` itself was three files in
-  `presets/`, which is G3 holding. `particles`, `kaleido`, and `ink` remain.
+  **Partly landed post-MVP (issues #24, #25):** the spectrum texture binding and
+  `ribbons`, then the onset-history binding and `particles`. Both bindings were
+  core work, as this non-goal anticipated, and both presets were three files in
+  `presets/`, which is G3 holding. `kaleido` and `ink` remain.
+
+  The onset-history binding was *not* planned — #24 landed believing the spectrum
+  was the last generic binding this design would need. `particles` proved
+  otherwise, and the reason generalizes past it. A preset that spawns something on
+  a hit and then lets it live must know when the hits it is still drawing
+  happened; the uniform's `onset` is one number about the frame being drawn, and a
+  fragment shader carries no state between frames. The alternatives were both
+  worse. Integrating particle state into a ping-ponged texture would make frame
+  `N` depend on how the driver rounded frames `0..N`, and golden frames would
+  become a hash of the driver rather than of the shader (G5). Widening the uniform
+  would put a 64-slot array into a struct VISION §6 fixes. So the hits are handed
+  over as the third optional texture, and every preset stays a pure function of
+  one frame's inputs. `kaleido` and `ink` are expected to need no fourth binding —
+  a fold and a reaction-diffusion read the layer beneath them and the previous
+  frame, both of which already exist.
 - **NG2** - Looped background video. The layer-stack design accounts for it, but
   the second-ffmpeg-reader thread ships post-MVP.
 - **NG3** - Codec matrix beyond x264 (`--codec x265|av1` deferred; `--quality`

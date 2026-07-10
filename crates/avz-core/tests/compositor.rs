@@ -319,7 +319,7 @@ fn visualizer_alpha_zero_shows_background_exactly() {
         colors,
         params,
     );
-    visualizer.draw(&gpu, &visual, &globals, &[]);
+    visualizer.draw(&gpu, &visual, &globals, &[], &[]);
 
     assert_eq!(
         composite(&gpu, &[&backdrop, &visual]),
@@ -363,7 +363,7 @@ fn a_loud_visualizer_frame_covers_the_background() {
         colors,
         params,
     );
-    visualizer.draw(&gpu, &visual, &globals, &[]);
+    visualizer.draw(&gpu, &visual, &globals, &[], &[]);
 
     assert_ne!(
         composite(&gpu, &[&backdrop, &visual]),

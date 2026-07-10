@@ -1,0 +1,6 @@
+# Golden frame hashes for the `particles` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 7cf5d3fed594e6f304aa2fc4a782a6c7f11f74f1ef6ffb2742d007f1e293d825
+10 05abab4731a6adb51ac7ca5bf6141c600209d4449ad4c56c379daf81e751cf08
+100 61b5759805a78fce29f4aead262fe77f99aba82d20869c31e97df843f1143f4e

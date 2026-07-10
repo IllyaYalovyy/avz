@@ -8,14 +8,16 @@
 //! touches nothing outside `presets/` (RFC-001 G3). No pipeline, binding, or
 //! compositor code moves (`AGENTS.md`, rendering).
 //!
-//! Beyond the uniform, a preset may ask for two things (`VISION.md` §6). The
+//! Beyond the uniform, a preset may ask for three things (`VISION.md` §6). The
 //! previous frame, by declaring `"needs_feedback": true` in its schema, which
 //! binds [`Feedback`](crate::render::Feedback) at `@binding(1)` and its sampler
-//! at `@binding(2)`. And this frame's coarse spectrum, by declaring
+//! at `@binding(2)`. This frame's coarse spectrum, by declaring
 //! `"needs_spectrum": true`, which binds [`Spectrum`](crate::render::Spectrum) at
-//! `@binding(3)`. Both declarations are data, so asking for either is still a
-//! change to `presets/` alone, and they are independent: a preset may ask for
-//! one, both, or neither.
+//! `@binding(3)`. And the song's recent hits, by declaring `"needs_onsets": true`,
+//! which binds [`OnsetHistory`](crate::render::OnsetHistory) at `@binding(4)`.
+//! All three declarations are data, so asking for any of them is still a change
+//! to `presets/` alone, and they are independent: a preset may ask for any
+//! subset.
 //!
 //! The palette that fills `Globals::palette` arrives in RFC-001 Step 16.
 
@@ -23,6 +25,7 @@ use crate::render::feedback::Feedback;
 use crate::render::globals::{GLOBALS_SIZE, Globals};
 use crate::render::layer::Layer;
 use crate::render::offscreen::{FRAME_FORMAT, Gpu};
+use crate::render::onsets::OnsetHistory;
 use crate::render::schema::PresetSchema;
 use crate::render::spectrum::Spectrum;
 use crate::{Error, Result};
@@ -100,6 +103,7 @@ pub struct Visualizer {
     bindings: wgpu::BindGroup,
     feedback: Option<Feedback>,
     spectrum: Option<Spectrum>,
+    onsets: Option<OnsetHistory>,
 }
 
 impl Visualizer {
@@ -113,10 +117,11 @@ impl Visualizer {
     ///
     /// [`Error::Config`] if the preset's embedded schema does not parse, and
     /// [`Error::Render`] if the shader does not compile or link — including when
-    /// it samples `@binding(1)` without declaring `needs_feedback`, or
-    /// `@binding(3)` without declaring `needs_spectrum`. The presets are
-    /// embedded, so both are bugs rather than bad user input, but a message beats
-    /// a panic on a driver that rejects what naga accepted.
+    /// it samples `@binding(1)` without declaring `needs_feedback`, `@binding(3)`
+    /// without declaring `needs_spectrum`, or `@binding(4)` without declaring
+    /// `needs_onsets`. The presets are embedded, so all of those are bugs rather
+    /// than bad user input, but a message beats a panic on a driver that rejects
+    /// what naga accepted.
     pub fn new(gpu: &Gpu, preset: &Preset, target: &Layer) -> Result<Self> {
         let device = gpu.device();
 
@@ -125,6 +130,7 @@ impl Visualizer {
             .needs_feedback
             .then(|| Feedback::new(gpu, target.width(), target.height()));
         let spectrum = schema.needs_spectrum.then(|| Spectrum::new(gpu));
+        let onsets = schema.needs_onsets.then(|| OnsetHistory::new(gpu));
 
         let errors = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
@@ -151,6 +157,9 @@ impl Visualizer {
         if spectrum.is_some() {
             layout_entries.extend(Spectrum::layout_entries());
         }
+        if onsets.is_some() {
+            layout_entries.extend(OnsetHistory::layout_entries());
+        }
 
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("avz globals"),
@@ -173,6 +182,9 @@ impl Visualizer {
         }
         if let Some(spectrum) = &spectrum {
             entries.extend(spectrum.bindings());
+        }
+        if let Some(onsets) = &onsets {
+            entries.extend(onsets.bindings());
         }
 
         let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -227,6 +239,7 @@ impl Visualizer {
             bindings,
             feedback,
             spectrum,
+            onsets,
         })
     }
 
@@ -243,20 +256,34 @@ impl Visualizer {
     /// must therefore be drawn in order, which is what `pipeline::render` does.
     ///
     /// `spectrum` is this frame's coarse spectrum, from
-    /// [`FeatureTimeline::spectrum`](crate::analysis::FeatureTimeline::spectrum).
-    /// A preset whose schema does not declare `needs_spectrum` never reads it, so
-    /// a caller with none — a test drawing a preset it wrote itself — may pass an
-    /// empty slice.
+    /// [`FeatureTimeline::spectrum`](crate::analysis::FeatureTimeline::spectrum),
+    /// and `onsets` the song's recent hits, from
+    /// [`FeatureTimeline::onset_history`](crate::analysis::FeatureTimeline::onset_history).
+    /// A preset whose schema declares neither `needs_spectrum` nor `needs_onsets`
+    /// never reads them, so a caller with neither — a test drawing a preset it
+    /// wrote itself — may pass empty slices.
     ///
     /// # Panics
     ///
     /// If the preset declares `needs_spectrum` and `spectrum` is not
-    /// [`SPECTRUM_BINS`](crate::analysis::SPECTRUM_BINS) long.
-    pub fn draw(&self, gpu: &Gpu, target: &Layer, globals: &Globals, spectrum: &[f32]) {
+    /// [`SPECTRUM_BINS`](crate::analysis::SPECTRUM_BINS) long, or declares
+    /// `needs_onsets` and `onsets` is not
+    /// `2 ×` [`ONSET_SLOTS`](crate::analysis::ONSET_SLOTS) long.
+    pub fn draw(
+        &self,
+        gpu: &Gpu,
+        target: &Layer,
+        globals: &Globals,
+        spectrum: &[f32],
+        onsets: &[f32],
+    ) {
         gpu.queue()
             .write_buffer(&self.uniforms, 0, &globals.to_bytes());
         if let Some(texture) = &self.spectrum {
             texture.upload(gpu, spectrum);
+        }
+        if let Some(texture) = &self.onsets {
+            texture.upload(gpu, onsets);
         }
 
         let mut encoder = gpu
@@ -455,6 +482,33 @@ mod tests {
                  spectrum binding",
                 preset.name,
                 schema.needs_spectrum,
+                if samples {
+                    "declares"
+                } else {
+                    "does not declare"
+                },
+            );
+        }
+    }
+
+    /// The same two-halves-of-one-decision problem again, for the onset history.
+    /// A schema that asks for it while its shader never reads it uploads a row of
+    /// hits on every frame of every render and shows nothing for it; a shader
+    /// that reads it without asking fails to build
+    /// (`a_preset_that_does_not_ask_for_the_onsets_gets_no_binding`).
+    #[test]
+    fn a_preset_asks_for_the_onset_history_exactly_when_its_shader_samples_it() {
+        for preset in PRESETS {
+            let schema = preset.schema().expect("a shipped schema parses");
+            let samples = preset.source.contains("@group(0) @binding(4)");
+
+            assert_eq!(
+                schema.needs_onsets,
+                samples,
+                "preset `{}` declares `needs_onsets: {}` but its WGSL {} the \
+                 onset-history binding",
+                preset.name,
+                schema.needs_onsets,
                 if samples {
                     "declares"
                 } else {

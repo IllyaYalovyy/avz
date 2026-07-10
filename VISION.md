@@ -256,7 +256,7 @@ struct Globals {
 }
 ```
 
-Plus optional bindings: spectrum texture (512×1), album-art texture, previous-frame texture (for feedback/trail effects — the workhorse of good abstract visuals).
+Plus optional bindings: spectrum texture (512×1), onset-history texture (64×1: the recent hits, so a preset can re-derive what an earlier beat spawned), album-art texture, previous-frame texture (for feedback/trail effects — the workhorse of good abstract visuals).
 
 **Schema** (per preset, JSON): parameter name → type (float/int/color/enum/bool), default, range, description, and which uniform slot it maps to. `avz presets <name>` pretty-prints it; config validation uses it.
 

@@ -12,6 +12,35 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`particles` preset.** Every hit throws a burst of sparks out of the middle of
+  the frame; they fly, slow against the air, fall, dim, and go out, and the highs
+  make the ones still burning twinkle. The second preset deferred by RFC-001 NG1
+  to land.
+
+  Every particle is a closed form of `(hit, index)` rather than a simulation
+  stepped forward: the hit gives it a birth, a seeded hash gives it a direction
+  and a speed, and `age = time - birth` gives it the rest. Nothing is integrated
+  between frames, so frame `N` is a pure function of frame `N`'s inputs — skip to
+  frame 4000 of a song and it draws what a render that passed through frames
+  `0..3999` would have drawn. Particles are drawn in the fragment stage against
+  the same fullscreen triangle every preset uses, not as vertex-pulled point
+  sprites: that keeps the one code path (`AGENTS.md`, rendering), and a per-burst
+  cull against the shell its particles occupy is what pays for it. The schema
+  carries a `perf_hint` for software rendering.
+- **Onset-history texture binding.** A preset opts in with `"needs_onsets": true`
+  in its schema and reads the last 64 hits at or before the frame being drawn as
+  a `64×1` `Rg32Float` texture at `@binding(4)`, newest first, each slot the hit's
+  birth time in seconds and its ordinal among the song's hits — with `textureLoad`
+  and no sampler, for the reason the spectrum binding gives. Unfilled slots hold a
+  birth a thousand seconds before the song began, so a preset's own lifetime test
+  rejects them and no emptiness flag is needed.
+
+  The uniform's `onset` is one number about the frame being drawn, which is
+  everything a flash needs and nothing at all to a particle spawned a second ago
+  and still in the air. Generic, not `particles`-specific, and independent of the
+  other two bindings: a preset may ask for any subset. This is the binding #24
+  said would not be needed; RFC-001 NG1 records why it was, and why `kaleido` and
+  `ink` should need no fourth.
 - **`ribbons` preset.** A stack of ribbons across the frame, each displaced,
   thickened, and lit by the song's own spectrum: the width of the frame is the
   log-frequency axis, bass at the left edge and air at the right. The first

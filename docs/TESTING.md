@@ -229,6 +229,54 @@ frame's width, and a `ribbons` wired backwards passes every hash.
 preset that drew its lanes whatever the texture said would satisfy the golden
 hashes and ignore the music.
 
+**The onset-history texture.** The third, tested in the same two halves.
+`crates/avz-core/tests/onset_history_texture.rs` pins the renderer's half against
+a test shader that paints column `n` with slot `n`'s birth time and ordinal, so
+the frame *is* the history row: both channels survive in the right order, an
+unfilled slot reads the `NO_ONSET` sentinel rather than a hit at time zero, the
+row uploaded is the frame being drawn, and a preset that did not declare
+`needs_onsets` fails to build if it reaches for `@binding(4)`.
+
+The preset's half is eight tests on `particles`, and each covers a way the preset
+could pass its golden hashes while being wrong.
+`particles_throws_a_burst_that_expands_as_the_hit_that_threw_it_recedes` reads the
+history as *time*: a `particles` that dropped its `textureLoad` and drew a still
+cloud would be blessed without the music in it.
+`particles_draws_nothing_without_a_live_hit` is the other direction, and covers
+the sentinel from the preset's side — a burst older than its lifetime, and a frame
+no hit has reached yet, must both be black.
+`a_burst_is_hashed_from_the_hit_that_threw_it_and_not_from_its_slot` covers the
+one bug the picture would hide: a slot is a place in a sliding window, and a
+preset that hashed it would tear every live particle across the frame on every
+kick — a shimmer that reads as an effect rather than as a bug, and that two
+blessed hashes would never disagree about.
+
+`the_burst_cull_takes_no_light_off_the_burst_it_skips` covers the optimization.
+`particles` skips a whole burst when the pixel it is shading lies outside the
+shell between the burst's slowest and fastest particle, widened by how far a
+particle's halo reaches. Widened by too little, the cull shaves the halo off both
+faces of that shell, and *every other test still passes*: the burst expands, it
+fades, it twinkles, and its golden hashes are blessed with the clipping in them.
+So the test asserts the shape rather than the speed — a ring of pixels that is
+dark while the ring beside it is bright is a cut, not a falloff. Narrowing the
+cull's `reach` from `size * GLOW_REACH` to `size` still leaves six of the other
+seven `particles` tests passing: the burst expands, fades, twinkles, and stays a
+pure function of its frame.
+
+`a_burst_lights_a_disc_on_the_frame_it_is_thrown` is the seventh, and the other
+half of that same cull. At age zero every particle of a burst is still at the
+origin, and what the frame shows is the disc their overlapping glows make. A cull
+that only admitted pixels *on* the burst's shell would shrink that disc to a
+single pixel, and the expansion test above would not notice — a one-pixel burst
+still expands.
+
+`particles_renders_a_frame_the_same_whether_or_not_the_frames_before_it_were_drawn`
+is the determinism claim the whole design rests on. A burst is re-derived from the
+hit that threw it on every frame, never integrated forward, so frame `N` is a pure
+function of frame `N`'s inputs — which is what lets `--sample 1:00..1:03` render
+the same seconds a full render would, and what keeps a golden hash from becoming a
+hash of the driver's rounding on the frames before it.
+
 The Rust side of that boundary is
 `globals_layout_matches_wgsl`, which pins every member's byte offset — the
 uniform is encoded by hand, field by field, since `avz-core` is
@@ -450,8 +498,13 @@ exists, or `TODO` / `manual` with a reason.
 | A preset ignores a feature it claims to be driven by | The kick, or the cymbals, drive nothing; the video looks alive and reacts to half the song | Integration (pixels) | `every_feature_pulse_reacts_to_changes_the_frame` |
 | The coarse spectrum is bucketed linearly, or off by a factor of two | The whole kick lands in two texels and `ribbons` reads hiss as loud as a snare — plausible, and wrong at every frequency | Unit | `a_tone_lights_the_coarse_bucket_that_holds_its_frequency`, `the_buckets_are_log_spaced_across_the_declared_range`, `a_bucket_averages_its_bins_rather_than_summing_them`, `a_bucket_narrower_than_one_fft_bin_reads_the_bin_nearest_it` |
 | The spectrum texture is uploaded once, or a row short, or byte-swapped | A preset draws a still ribbon over a moving song, or reads off the end of its own texture | Unit + integration (pixels) | `every_video_frame_carries_a_512_bucket_spectrum`, `a_hot_bucket_lights_the_column_that_reads_it_and_no_other`, `the_texture_carries_the_spectrum_of_the_frame_being_drawn` |
-| A preset reaches for an optional binding it never declared, or declares one it never reads | A shader samples a texture nobody bound, or every frame pays for an upload that shows nothing | Unit + integration | `a_preset_that_does_not_ask_for_the_spectrum_gets_no_binding`, `a_preset_asks_for_the_spectrum_texture_exactly_when_its_shader_samples_it`, `a_preset_may_ask_for_the_spectrum_and_the_previous_frame_together` |
+| A preset reaches for an optional binding it never declared, or declares one it never reads | A shader samples a texture nobody bound, or every frame pays for an upload that shows nothing | Unit + integration | `a_preset_that_does_not_ask_for_the_spectrum_gets_no_binding`, `a_preset_asks_for_the_spectrum_texture_exactly_when_its_shader_samples_it`, `a_preset_may_ask_for_the_spectrum_and_the_previous_frame_together`, `a_preset_that_does_not_ask_for_the_onsets_gets_no_binding`, `a_preset_asks_for_the_onset_history_exactly_when_its_shader_samples_it`, `a_preset_may_ask_for_the_onsets_and_the_previous_frame_together` |
 | `ribbons` stops reading the spectrum, or reads its frequency axis backwards | The golden hashes are blessed over a preset that draws flat lines and ignores the music | Integration (pixels) | `ribbons_draws_its_light_where_the_spectrum_has_energy`, `ribbons_draws_nothing_where_the_spectrum_is_silent` |
+| The onset history is uploaded once, byte-swapped, or with its channels crossed | A burst preset re-derives every particle from the wrong hit, and the bursts land off the beat | Unit + integration (pixels) | `the_onset_history_holds_the_recent_hits_newest_first`, `every_slot_reaches_the_texel_that_reads_it_with_both_channels_intact`, `the_texture_carries_the_history_of_the_frame_being_drawn` |
+| An unfilled onset slot reads as a hit at time zero | Every render opens with a burst the song never played | Unit + integration (pixels) | `a_song_with_no_hits_yet_hands_back_an_empty_history`, `an_unfilled_slot_reads_the_sentinel_and_not_a_hit_at_time_zero`, `particles_draws_nothing_without_a_live_hit` |
+| A burst is hashed from its sliding slot rather than from the hit that threw it | Every live particle tears across the frame on every kick; both frames still hash, so no golden test disagrees | Integration (pixels) | `a_burst_is_hashed_from_the_hit_that_threw_it_and_not_from_its_slot` |
+| `particles`' burst cull is narrower than a particle's glow | The cull stops being an optimization and becomes the shape: bursts get a hard edge and a hollow middle, and the golden hashes bless it | Integration (pixels) | `the_burst_cull_takes_no_light_off_the_burst_it_skips`, `a_burst_lights_a_disc_on_the_frame_it_is_thrown` |
+| A preset carries state between draws | Frame `N` depends on the driver's rounding on frames `0..N`; `--sample` renders different pixels than a full render | Integration (pixels) | `particles_renders_a_frame_the_same_whether_or_not_the_frames_before_it_were_drawn` |
 | The spectrogram's global normalization divides by a silent song's zero spread | A `NaN` reaches the texture and every ribbon paints black | Unit | `a_silent_song_has_a_zero_spectrum_and_no_nans`, `the_spectrum_is_normalized_into_the_unit_interval` |
 | `--seed` never reaches the shader's noise | Two seeds render the same video; `--seed` is decoration | Integration (pixels) | `different_seed_different_hash` |
 | A golden test renders on a hardware adapter | The committed hashes are a hash of one laptop; the test fails everywhere else for reasons that look like shader bugs | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |

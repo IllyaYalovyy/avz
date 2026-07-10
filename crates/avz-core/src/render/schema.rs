@@ -42,12 +42,22 @@ pub struct PresetSchema {
     pub needs_feedback: bool,
     /// Whether the preset samples this frame's coarse spectrum (`VISION.md` §6).
     ///
-    /// The other binding a preset may ask for: a `512×1` texture of the frame's
+    /// The second binding a preset may ask for: a `512×1` texture of the frame's
     /// log-spaced spectrum, at `@binding(3)`, read with `textureLoad`. Independent
     /// of [`Self::needs_feedback`] — a preset may ask for either, both, or
     /// neither — and, like it, a shader that reaches for the binding without
     /// declaring it fails to build.
     pub needs_spectrum: bool,
+    /// Whether the preset re-simulates from the song's recent hits
+    /// (`VISION.md` §6).
+    ///
+    /// The third binding a preset may ask for: a `64×1` `Rg32Float` texture of
+    /// the last
+    /// [`ONSET_SLOTS`](crate::analysis::ONSET_SLOTS) hits at or before this
+    /// frame, newest first, at `@binding(4)`. Independent of the other two, and
+    /// like them a shader that reaches for the binding without declaring it
+    /// fails to build.
+    pub needs_onsets: bool,
     /// What to tell a user rendering this preset on lavapipe (`VISION.md` §7).
     pub perf_hint: Option<String>,
 }
@@ -220,6 +230,7 @@ impl PresetSchema {
             params,
             needs_feedback: raw.needs_feedback,
             needs_spectrum: raw.needs_spectrum,
+            needs_onsets: raw.needs_onsets,
             perf_hint: raw.perf_hint,
         })
     }
@@ -392,6 +403,8 @@ struct RawSchema {
     needs_feedback: bool,
     #[serde(default)]
     needs_spectrum: bool,
+    #[serde(default)]
+    needs_onsets: bool,
     #[serde(default)]
     perf_hint: Option<String>,
 }
