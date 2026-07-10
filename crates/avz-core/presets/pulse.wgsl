@@ -10,6 +10,16 @@
 // number is a hash of the fragment position, `time`, and `seed` (AGENTS.md).
 //
 // Output is linear — the render target is `Rgba8UnormSrgb` and encodes on write.
+//
+// The `params` slots below are declared in `pulse.json`, which is the only place
+// their names, defaults, and ranges live. Every default reproduces the constant
+// it replaced, so the golden frames are unchanged by their arrival.
+//
+//   params[0].x  bass_drive     params[1].x  sparkle_gain
+//   params[0].y  ring_count     params[1].y  grain
+//   params[0].z  ring_density   params[1].z  glow
+//   params[0].w  drift_speed    params[1].w  vignette
+//                               params[2].x  flash
 
 // The uniform contract every preset receives. The Rust side that fills it is
 // `render/globals.rs`; the layout it encodes is documented there.
@@ -87,13 +97,16 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let counter_hue = accent(1.0 - g.centroid);
 
     // Kick: the core disc swells with the bass envelope and snaps on an onset.
-    let radius = 0.14 + 0.13 * g.bass_env + 0.05 * g.onset;
+    // `bass_drive` scales the swell; the envelope is already in 0..1, so the
+    // clamp only bites once a user drives it past one.
+    let bass = clamp(g.bass_env * g.params[0].x, 0.0, 1.0);
+    let radius = 0.14 + 0.13 * bass + 0.05 * g.onset;
     let core = band(max(r - radius, 0.0), 0.035 + 0.05 * g.onset);
 
     // Vocals-ish: the mids set how tightly the rings pack; the low mids push
     // them outward. `time` is the only clock, so the drift is frame-exact.
-    let ring_frequency = 4.0 + 14.0 * g.mid_env;
-    let drift = g.time * (0.2 + 0.5 * g.low_mid_env);
+    let ring_frequency = g.params[0].y + g.params[0].z * g.mid_env;
+    let drift = g.time * (0.2 + 0.5 * g.low_mid_env) * g.params[0].w;
     let wave = 0.5 + 0.5 * cos(TAU * (r * ring_frequency - drift));
     let rings = pow(wave, 6.0) * smoothstep(radius, radius + 0.06, r);
 
@@ -103,7 +116,7 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     let cell = floor(p * 96.0);
     let noise = hash21(cell + vec2<f32>(g.seed * 137.0, g.seed * 71.0));
     let twinkle = 0.5 + 0.5 * cos(TAU * (g.time * (0.7 + noise) + noise));
-    let sparkle = g.high_env * step(0.94, noise) * twinkle;
+    let sparkle = g.high_env * step(0.94, noise) * twinkle * g.params[1].x;
 
     // Shimmer: per-pixel, per-frame grain, small enough to read as texture.
     let grain = hash21(position.xy + vec2<f32>(g.time * 60.0, g.seed * 913.0));
@@ -112,14 +125,14 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     // A hit lands on the beat and not after it: `onset` is 1.0 on exactly the
     // frame the flux peaked (`analysis::onset`), so the flash is the core going
     // brighter and wider on that frame, with no smoothing in front of it.
-    color += hue * core * (0.85 + 0.4 * g.onset);
+    color += hue * core * (0.85 + 0.4 * g.onset * g.params[2].x);
     color += counter_hue * rings * 0.55;
     color += vec3<f32>(sparkle);
-    color += hue * g.flux * 0.12;
-    color += vec3<f32>((grain - 0.5) * 0.06 * g.air_env);
+    color += hue * g.flux * 0.12 * g.params[1].z;
+    color += vec3<f32>((grain - 0.5) * g.params[1].y * g.air_env);
 
     // A vignette keeps the corners out of the way of the geometry.
-    color *= 1.0 - 0.55 * smoothstep(0.35, 0.95, r);
+    color *= 1.0 - g.params[1].w * smoothstep(0.35, 0.95, r);
 
     // Loudness is the last word: the whole frame breathes with the song, and a
     // silent passage goes nearly black rather than sitting at half brightness.

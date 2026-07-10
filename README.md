@@ -17,13 +17,14 @@ See [VISION.md](VISION.md) for the full design: architecture, module breakdown,
 preset system, milestones, and backlog. VISION.md is the north star; a feature
 request that does not serve it goes to the backlog.
 
-**Status:** M1 landed. `avz render song.mp3` runs the whole pipeline — decode,
-RMS analysis, offscreen wgpu render, ffmpeg encode with the original audio muxed
-untouched — and `avz probe` reports tags. The visuals are still the tracer
-bullet: a fullscreen grey whose brightness follows loudness. Real presets,
-palettes, text, and background layers arrive in M2–M4, so `--preset`,
-`--palette`, `--config`, `--set`, and `--bg` below are not flags yet, and
-`avz presets` and `avz config` still exit with "not implemented yet".
+**Status:** M2 landed, and M3 is under way. `avz render song.mp3` runs the whole
+pipeline — decode, full FFT analysis with envelopes and onsets, the `pulse`
+preset on the GPU, ffmpeg encode with the original audio muxed untouched — and
+`avz probe` reports tags. `avz presets` lists what ships and prints a preset's
+parameter schema; `--config` and `--set` configure it. Palettes, text, and
+background layers arrive in the rest of M3 and M4, so `--preset`, `--palette`,
+and `--bg` below are not flags yet, and `avz config` still exits with
+"not implemented yet".
 
 ## Requirements
 
@@ -68,9 +69,15 @@ avz render song.mp3 --config cold-design.toml
 # Tweak one knob on top of a config
 avz render song.mp3 --config base.toml --set visual.intensity=1.4
 
+# Tune a preset parameter. A key that names no config section is a parameter of
+# the preset being rendered, so these three spellings all mean the same thing:
+avz render song.mp3 --set visual.params.bass_drive=1.5
+avz render song.mp3 --set pulse.bass_drive=1.5
+avz render song.mp3 --set bass_drive=1.5
+
 # Discovery
 avz presets                 # list presets with one-line descriptions
-avz presets nebula          # full parameter schema, defaults, ranges
+avz presets pulse           # full parameter schema, defaults, ranges
 avz probe song.mp3          # tags, duration, embedded art, sample rate
 
 # Batch an album — plain shell, no special support needed
@@ -111,7 +118,8 @@ task-runner files, prompts, context files, and chat logs from being committed:
 ├── Cargo.toml                   # Cargo workspace
 ├── crates/
 │   ├── avz-core/                # library: analysis / meta / render / encode /
-│   │                            #          config / pipeline
+│   │   │                        #          config / pipeline
+│   │   └── presets/             # WGSL + JSON schema + registry, embedded
 │   └── avz-cli/                 # thin binary `avz`: clap → avz-core calls
 ├── designs/
 │   ├── RFC-000-template.md      # Design proposal template
@@ -132,8 +140,10 @@ task-runner files, prompts, context files, and chat logs from being committed:
 └── .github/workflows/quality.yml
 ```
 
-Still to land (VISION.md §4.1): `crates/avz-core/presets/`, holding the WGSL
-shaders and schema JSON embedded via `include_str!`.
+A preset is three things in `crates/avz-core/presets/`: `<name>.wgsl`,
+`<name>.json` declaring its parameters, and one row in `registry.rs`. Adding one
+touches nothing else, which
+`scripts/quality.d/96-a-preset-is-only-files-in-presets.sh` enforces.
 
 `avz-core` has zero terminal I/O and reports progress through a callback trait.
 That core/cli split is the "a GUI could be added later without refactoring"

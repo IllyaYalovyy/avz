@@ -34,6 +34,7 @@
 
 use crate::analysis::FeatureFrame;
 use crate::config::{Color, MAX_PALETTE_COLORS};
+use crate::render::schema::PackedParams;
 
 /// Palette slots the uniform carries (`VISION.md` §6: `pal: array<vec4, 5>`).
 pub const PALETTE_SLOTS: usize = MAX_PALETTE_COLORS;
@@ -65,12 +66,17 @@ pub struct Globals {
     /// Linear because the render target is `Rgba8UnormSrgb` and encodes on
     /// write, so a shader that blends must blend in linear space.
     pub palette: [[f32; 4]; PALETTE_SLOTS],
-    /// Preset parameters. All zero until RFC-001 Step 15 gives presets a schema.
-    pub params: [[f32; 4]; PARAM_SLOTS],
+    /// The active preset's parameters, packed by
+    /// [`PresetSchema::resolve`](crate::render::PresetSchema::resolve).
+    pub params: PackedParams,
 }
 
 impl Globals {
     /// The uniform for video frame `frame_index` of a song rendered at `fps`.
+    ///
+    /// `params` is packed once per render, not once per frame: a preset's
+    /// parameters are configuration, and configuration does not move with the
+    /// music.
     pub fn for_frame(
         frame_index: usize,
         fps: u32,
@@ -78,6 +84,7 @@ impl Globals {
         seed: u64,
         features: FeatureFrame,
         palette: [Color; PALETTE_SLOTS],
+        params: PackedParams,
     ) -> Self {
         // The f64 divide is `FeatureTimeline::timestamp`'s, so the shader's clock
         // and the timeline's agree exactly on every frame.
@@ -89,7 +96,7 @@ impl Globals {
             seed: seed_fraction(seed),
             features,
             palette: palette.map(linear_rgba),
-            params: [[0.0; 4]; PARAM_SLOTS],
+            params,
         }
     }
 
@@ -188,7 +195,10 @@ pub fn seed_fraction(seed: u64) -> f32 {
 }
 
 /// An sRGB config color as linear-space RGBA, which is what shaders blend in.
-fn linear_rgba(color: Color) -> [f32; 4] {
+///
+/// Shared with [`schema`](crate::render::schema), so a `color` preset parameter
+/// reaches the shader in the same space the palette does.
+pub(crate) fn linear_rgba(color: Color) -> [f32; 4] {
     [
         srgb_to_linear(color.r),
         srgb_to_linear(color.g),
@@ -217,6 +227,12 @@ mod tests {
 
     fn white() -> [Color; PALETTE_SLOTS] {
         ["#ffffff".parse().expect("a color"); PALETTE_SLOTS]
+    }
+
+    /// A preset with every parameter at zero: the uniform layout is what these
+    /// tests are about, not any particular preset's schema.
+    fn no_params() -> PackedParams {
+        [[0.0; 4]; PARAM_SLOTS]
     }
 
     /// Read the `f32` at `offset` out of an encoded uniform.
@@ -325,7 +341,8 @@ mod tests {
     #[test]
     fn time_is_the_frame_index_over_the_frame_rate() {
         for (index, fps, expected) in [(0, 30, 0.0), (30, 30, 1.0), (45, 30, 1.5), (60, 24, 2.5)] {
-            let globals = Globals::for_frame(index, fps, (320, 180), 0, features(), white());
+            let globals =
+                Globals::for_frame(index, fps, (320, 180), 0, features(), white(), no_params());
             assert_eq!(globals.time, expected, "frame {index} at {fps} fps");
         }
     }
@@ -356,7 +373,7 @@ mod tests {
             "#ffffff".parse().expect("a color"),
             "#ffffff".parse().expect("a color"),
         ];
-        let globals = Globals::for_frame(0, 30, (320, 180), 0, features(), colors);
+        let globals = Globals::for_frame(0, 30, (320, 180), 0, features(), colors, no_params());
 
         assert_eq!(globals.palette[0], [0.0, 0.0, 0.0, 1.0]);
         assert_eq!(globals.palette[1], [1.0, 1.0, 1.0, 1.0]);

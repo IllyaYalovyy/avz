@@ -122,8 +122,19 @@ changes lavapipe's rounding. The `every_feature_pulse_reacts_to_changes_the_fram
 and `same_inputs_same_hash_twice` tests stay green through the second, so a
 regenerate is safe when only the hashes moved and nothing else did.
 
-**The preset contract.** A preset is one WGSL file in `crates/avz-core/presets/`
-plus a row in `render::preset::PRESETS`. `every_preset_declares_the_whole_globals_contract`
+**The preset contract.** A preset is one WGSL file in `crates/avz-core/presets/`,
+one JSON parameter schema beside it, and a row in `presets/registry.rs` — which
+`src/render/preset.rs` `include!`s, so all three live in one directory and
+`scripts/quality.d/96-a-preset-is-only-files-in-presets.sh` can say so. That hook
+is RFC-001 G3 as a check: it fails if a shader ships without a schema, if a
+schema names no shader, if a registry row goes missing, or if a preset is
+embedded from `src/`. `every_schema_parameter_is_read_by_the_shader_that_declares_it`
+covers the other half — a schema slot the WGSL never reads is a knob wired to
+nothing — and `param_reaches_declared_uniform_slot` proves the same thing in
+pixels, by turning each parameter off its default and demanding the frame change.
+That test also pins the *defaults*: the committed golden hashes must be what the
+schema's own defaults render, so a default that drifts away from the constant it
+replaced fails there rather than in a video nobody re-watches. `every_preset_declares_the_whole_globals_contract`
 checks that its `struct Globals` still spells out the `VISION.md` §6 members,
 because a preset that renamed one would compile against its own struct and read
 the wrong feature at that offset. The Rust side of that boundary is
@@ -273,6 +284,18 @@ exists, or `TODO` / `manual` with a reason.
 | ffmpeg's stderr pipe fills while avz waits to write a frame | Render deadlocks with no diagnostic | Integration | `ffmpeg_death_midrender_leaves_no_output_file` (surfaces the drained stderr) |
 | Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (bitstream compare) + unit + quality hook | `muxed_audio_stream_is_copied_not_reencoded`, `the_audio_stream_is_copied_and_never_reencoded`, `scripts/quality.d/80-audio-is-never-reencoded.sh` |
 | Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |
+| A preset schema declares a parameter the shader never reads | The knob does nothing; `avz presets` documents a lie | Unit + golden frames | `every_schema_parameter_is_read_by_the_shader_that_declares_it`, `param_reaches_declared_uniform_slot` |
+| Two schema parameters claim one uniform component | The second silently overwrites the first; one knob does nothing | Unit | `two_parameters_may_not_claim_the_same_uniform_component`, `a_color_cannot_start_partway_through_its_slot`, `a_slot_beyond_the_uniform_is_rejected` |
+| A schema default drifts from the constant the shader used before it | Every golden hash is rewritten by a change that looks like a refactor | Golden frames | `param_reaches_declared_uniform_slot` (the defaults must render the committed hashes) |
+| A schema default sits outside its own declared range | `avz presets` prints a range the default violates; every default render is illegal | Unit (meta over every shipped schema) | `schema_defaults_all_within_declared_ranges`, `a_schema_whose_default_is_outside_its_own_range_is_rejected` |
+| A preset parameter reaches the config but not the uniform | Every `[visual.params]` value silently does nothing | Integration (pixels) | `a_preset_parameter_from_the_config_reaches_the_rendered_pixels` |
+| An unknown or out-of-range parameter is caught after analysis, or not at all | A five-minute decode before a one-word error, or a shader clamping in silence | Unit + integration + CLI | `unknown_param_rejected_with_suggestion`, `out_of_range_value_names_the_allowed_range`, `an_out_of_range_parameter_fails_before_the_song_is_decoded`, `an_unknown_parameter_fails_before_the_song_is_decoded_and_suggests_a_name`, `out_of_range_value_fails_exit_2_before_render` |
+| A `--set` shorthand swallows a mistyped config section | `outputt.fps=30` is reported as an unknown preset *parameter*, pointing at the wrong mistake | Unit | `a_set_key_under_an_unknown_section_names_the_sections_and_the_presets`, `a_bare_set_key_is_a_parameter_of_the_active_preset`, `a_preset_prefixed_set_key_is_a_parameter_of_that_preset`, `the_shorthand_and_the_long_form_set_the_same_parameter` |
+| An int parameter silently accepts a float, or a bool a string | `ring_count = 4.5` renders 4 rings nobody asked for | Unit | `an_int_parameter_rejects_a_float`, `a_bool_parameter_rejects_the_string_true`, `a_float_parameter_accepts_a_bare_integer` |
+| A `color` parameter reaches the shader in sRGB rather than linear | The tint is a stop and a half off, exactly like a mis-linearized palette | Unit | `a_color_parameter_is_linearized_across_its_whole_slot` |
+| Adding a preset requires touching code outside `presets/` | The abstraction VISION §6 promises is wrong, and the four deferred presets get expensive | Quality hook | `scripts/quality.d/96-a-preset-is-only-files-in-presets.sh` |
+| `avz presets` omits a preset, a column, or a `perf_hint` | UT-004 discovery fails; a parameter exists that nobody can find | Unit (CLI formatter) + CLI | `the_listing_names_every_preset_and_describes_it`, `the_schema_print_shows_every_column_for_every_type`, `the_schema_columns_are_aligned`, `a_perf_hint_is_printed_when_the_schema_carries_one`, `presets_command_lists_all_registered`, `presets_name_prints_schema_fields` |
+| `--config` or `--set` never reaches the pipeline | The reproducible-render promise of UT-007 is decoration | CLI | `a_config_files_preset_params_are_validated_against_the_schema`, `a_set_override_beats_an_illegal_value_in_the_config_file`, `unknown_param_via_set_exits_2_with_a_suggestion` |
 | Config precedence wrong (`--set` loses to file) | Reproducible renders are not reproducible | Unit | `set_override_beats_config_file_value`, `cli_flag_beats_set_override`, `a_silent_layer_does_not_erase_a_lower_one` |
 | Unknown TOML key silently ignored | Typo'd param silently does nothing | Unit | `unknown_toml_key_rejected_with_suggestion`, `unknown_set_key_is_rejected_with_a_suggestion_and_the_assignment` |
 | Missing ID3 tags | Crash instead of a warned-and-skipped text card | Unit | `untagged_mp3_reports_missing_tags_instead_of_failing`, `blank_and_whitespace_tag_values_count_as_missing`, `missing_tags_render_as_missing_and_missing_art_as_none` |

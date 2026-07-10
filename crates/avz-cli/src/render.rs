@@ -40,11 +40,18 @@ pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
         .into());
     }
 
+    // `VISION.md` §5.5: CLI flags > `--set` > `--config` > preset defaults >
+    // built-in defaults. `Sources` is where that order is written down.
     let config = Sources {
         sample_defaults: match args.sample {
             Some(_) => ConfigLayer::for_sample(),
             None => ConfigLayer::default(),
         },
+        file: match &args.config {
+            Some(path) => ConfigLayer::from_file(path)?,
+            None => ConfigLayer::default(),
+        },
+        set: ConfigLayer::from_set_assignments(&args.set)?,
         ..Sources::default()
     }
     .resolve()?;

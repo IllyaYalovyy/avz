@@ -268,6 +268,54 @@ fn set_merges_preset_params_key_wise_instead_of_replacing_them() {
     assert_eq!(params["bass_drive"].as_float(), Some(2.0));
 }
 
+/// `VISION.md` §3 shows `--set visual.intensity=1.4`, but a preset parameter
+/// lives two tables down. A bare name is the spelling worth typing, and it can
+/// only mean one thing: a parameter of the preset being rendered.
+#[test]
+fn a_bare_set_key_is_a_parameter_of_the_active_preset() {
+    let layer = ConfigLayer::from_set_assignments(["bass_drive=2.0"]).expect("--set parses");
+
+    let params = layer.visual.params.expect("a params table");
+    assert_eq!(params["bass_drive"].as_float(), Some(2.0));
+}
+
+/// `--set pulse.bass_drive=2` names the preset the parameter belongs to, which
+/// is how a config file or a shell history reads years later.
+#[test]
+fn a_preset_prefixed_set_key_is_a_parameter_of_that_preset() {
+    let layer = ConfigLayer::from_set_assignments(["pulse.bass_drive=2.0"]).expect("--set parses");
+
+    let params = layer.visual.params.expect("a params table");
+    assert_eq!(params["bass_drive"].as_float(), Some(2.0));
+}
+
+/// The shorthand must not swallow a typo'd section name and turn it into a
+/// parameter nobody declared — the error would then name the wrong thing.
+#[test]
+fn a_set_key_under_an_unknown_section_names_the_sections_and_the_presets() {
+    let err = ConfigLayer::from_set_assignments(["outputt.fps=30"]).expect_err("rejected");
+    let message = err.to_string();
+
+    assert!(message.contains("outputt.fps=30"), "{message}");
+    assert!(message.contains("did you mean `output`"), "{message}");
+
+    let err = ConfigLayer::from_set_assignments(["nebula.bass_drive=2"]).expect_err("rejected");
+    assert!(
+        err.to_string().contains("pulse"),
+        "an unshipped preset must name the ones that do exist: {err}"
+    );
+}
+
+/// Shorthand and long form reach the same table, so a config file and a `--set`
+/// can be mixed without surprise.
+#[test]
+fn the_shorthand_and_the_long_form_set_the_same_parameter() {
+    let long = ConfigLayer::from_set_assignments(["visual.params.bass_drive=2.0"]);
+    let short = ConfigLayer::from_set_assignments(["bass_drive=2.0"]);
+
+    assert_eq!(long.expect("parses"), short.expect("parses"));
+}
+
 #[test]
 fn unknown_set_key_is_rejected_with_a_suggestion_and_the_assignment() {
     let err = ConfigLayer::from_set_assignments(["visual.intencity=1.4"]).expect_err("rejected");

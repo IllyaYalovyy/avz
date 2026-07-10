@@ -31,7 +31,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use avz_core::analysis::FeatureFrame;
 use avz_core::config::Color;
 use avz_core::render::{
-    AdapterChoice, Globals, Gpu, Offscreen, PALETTE_SLOTS, PRESETS, Preset, Visualizer,
+    AdapterChoice, Globals, Gpu, Offscreen, PALETTE_SLOTS, PRESETS, PackedParams, ParamKind,
+    Preset, Visualizer,
 };
 use sha2::{Digest, Sha256};
 
@@ -127,10 +128,33 @@ fn synthetic_frame(frame_index: usize) -> FeatureFrame {
     }
 }
 
+/// A preset's parameters at the defaults its schema declares.
+///
+/// The golden hashes are hashes of a *default* render, which is what makes
+/// `param_reaches_declared_uniform_slot` able to assert that setting a parameter
+/// back to its default reproduces them.
+fn defaults(preset: &Preset) -> PackedParams {
+    preset
+        .schema()
+        .expect("the shipped schema parses")
+        .resolve(&toml::Table::new())
+        .expect("the shipped defaults pack")
+}
+
 /// Render one preset frame on lavapipe and hash the RGBA bytes.
 ///
 /// Opens its own device, so callers must not already hold [`one_device_at_a_time`].
 fn render_hash(preset: &Preset, frame_index: usize, seed: u64) -> String {
+    render_hash_with(preset, frame_index, seed, defaults(preset))
+}
+
+/// [`render_hash`], with the preset's parameters chosen by the caller.
+fn render_hash_with(
+    preset: &Preset,
+    frame_index: usize,
+    seed: u64,
+    params: PackedParams,
+) -> String {
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software)
         .expect("golden frames need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
@@ -144,6 +168,7 @@ fn render_hash(preset: &Preset, frame_index: usize, seed: u64) -> String {
         seed,
         synthetic_frame(frame_index),
         palette(),
+        params,
     );
     visualizer.draw(&gpu, &target, &globals);
     let pixels = target.read_rgba(&gpu).expect("the frame reads back");
@@ -234,6 +259,88 @@ fn every_preset_renders_its_golden_frames() {
     }
 }
 
+/// A value away from the schema's default, whatever the parameter's type.
+///
+/// Derived rather than written down, so a preset author who adds a parameter
+/// gets it covered by `param_reaches_declared_uniform_slot` without touching
+/// this file — which is the whole of RFC-001 G3.
+fn off_default(kind: &ParamKind) -> toml::Value {
+    match kind {
+        ParamKind::Float { default, min, max } => {
+            let other = if (*default - *max).abs() > f32::EPSILON {
+                *max
+            } else {
+                *min
+            };
+            toml::Value::Float(f64::from(other))
+        }
+        ParamKind::Int { default, min, max } => {
+            let other = if default != max { *max } else { *min };
+            toml::Value::Integer(other)
+        }
+        ParamKind::Bool { default } => toml::Value::Boolean(!default),
+        ParamKind::Enum { default, variants } => {
+            let other = variants
+                .iter()
+                .find(|variant| *variant != default)
+                .unwrap_or_else(|| panic!("an enum with one variant tunes nothing"));
+            toml::Value::String(other.clone())
+        }
+        ParamKind::Color { default } => {
+            let inverted = format!("#{:02x}{:02x}{:02x}", !default.r, !default.g, !default.b);
+            toml::Value::String(inverted)
+        }
+    }
+}
+
+/// Every schema parameter reaches the uniform slot it declares, and the schema's
+/// own defaults are what the committed golden hashes were rendered from.
+///
+/// Two failures this catches, neither of which any other test would notice:
+/// a parameter packed into a slot the shader does not read (the knob does
+/// nothing), and a schema default drifting away from the constant the shader
+/// used before it had parameters (every golden hash silently rewritten).
+#[test]
+fn param_reaches_declared_uniform_slot() {
+    // Frame 10 drives every envelope, the flux, and the onset, so every `pulse`
+    // parameter has something to act on.
+    const FRAME: usize = 10;
+
+    for preset in PRESETS {
+        let schema = preset.schema().expect("the shipped schema parses");
+
+        let baseline = render_hash_with(preset, FRAME, GOLDEN_SEED, defaults(preset));
+        let recorded = recorded(preset)
+            .into_iter()
+            .find(|(index, _)| *index == FRAME)
+            .map(|(_, hash)| hash)
+            .expect("frame 10 is a golden frame");
+        assert_eq!(
+            baseline, recorded,
+            "preset `{}` renders its golden frames only at its schema defaults",
+            preset.name,
+        );
+
+        for param in &schema.params {
+            let mut overrides = toml::Table::new();
+            overrides.insert(param.name.clone(), off_default(&param.kind));
+            let packed = schema
+                .resolve(&overrides)
+                .unwrap_or_else(|err| panic!("`{}` off its default: {err}", param.name));
+
+            assert_ne!(
+                render_hash_with(preset, FRAME, GOLDEN_SEED, packed),
+                baseline,
+                "`{}.{}` packs into params[{}].{} but no pixel depends on it",
+                preset.name,
+                param.name,
+                param.slot.index,
+                param.slot.component,
+            );
+        }
+    }
+}
+
 /// Determinism, on one machine and one adapter: the same uniform renders the
 /// same pixels. A shader that read a wall clock or an unseeded RNG fails here
 /// long before anyone compares two machines.
@@ -313,14 +420,22 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
         ("onset", |f| f.onset = 1.0),
     ];
 
+    let params = defaults(preset);
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
     let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
     let visualizer = Visualizer::new(&gpu, preset).expect("pulse compiles");
 
     let draw = |features: FeatureFrame| {
-        let globals =
-            Globals::for_frame(10, FPS, (WIDTH, HEIGHT), GOLDEN_SEED, features, palette());
+        let globals = Globals::for_frame(
+            10,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            features,
+            palette(),
+            params,
+        );
         visualizer.draw(&gpu, &target, &globals);
         hex(&target.read_rgba(&gpu).expect("the frame reads back"))
     };
@@ -407,9 +522,17 @@ fn dump_pulse_tuning_frames() {
     let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
     let visualizer = Visualizer::new(&gpu, preset).expect("pulse compiles");
 
+    let params = defaults(preset);
     for (name, features) in cases {
-        let globals =
-            Globals::for_frame(10, FPS, (WIDTH, HEIGHT), GOLDEN_SEED, features, palette());
+        let globals = Globals::for_frame(
+            10,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            features,
+            palette(),
+            params,
+        );
         visualizer.draw(&gpu, &target, &globals);
         let pixels = target.read_rgba(&gpu).expect("the frame reads back");
 

@@ -541,19 +541,25 @@ fn suggestion(message: &str) -> Option<String> {
         .iter()
         .find_map(|prefix| message.find(prefix).map(|at| at + prefix.len()))?;
 
-    let mut quoted = message[offset..]
-        .split('`')
-        .skip(1)
-        .step_by(2)
-        .map(str::to_owned);
+    let mut quoted = message[offset..].split('`').skip(1).step_by(2);
 
     let unknown = quoted.next()?;
-    let candidates: Vec<String> = quoted.collect();
+    let candidates: Vec<&str> = quoted.collect();
 
+    closest(unknown, candidates.into_iter()).map(str::to_owned)
+}
+
+/// The candidate closest to `unknown`, if any is close enough to be worth saying.
+///
+/// The one place a "did you mean" is decided, so a preset parameter and a TOML
+/// key are held to the same standard of resemblance.
+pub(crate) fn closest<'a>(
+    unknown: &str,
+    candidates: impl Iterator<Item = &'a str>,
+) -> Option<&'a str> {
     candidates
-        .into_iter()
         .map(|candidate| {
-            let score = strsim::normalized_damerau_levenshtein(&unknown, &candidate);
+            let score = strsim::normalized_damerau_levenshtein(unknown, candidate);
             (candidate, score)
         })
         .filter(|(_, score)| *score >= SUGGESTION_THRESHOLD)

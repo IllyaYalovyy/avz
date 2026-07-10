@@ -67,6 +67,19 @@ pub struct RenderArgs {
     #[arg(long, value_name = "RANGE")]
     pub sample: Option<SampleRange>,
 
+    /// A TOML config file. See `avz config --example` for a documented template.
+    #[arg(long, value_name = "FILE")]
+    pub config: Option<PathBuf>,
+
+    /// Override one setting: `--set visual.intensity=1.4`. Repeatable.
+    ///
+    /// A key that names no config section is a parameter of the preset being
+    /// rendered, so `--set bass_drive=1.5` and `--set pulse.bass_drive=1.5` are
+    /// both shorthand for `--set visual.params.bass_drive=1.5`. Run
+    /// `avz presets <name>` to see what a preset accepts.
+    #[arg(long, value_name = "KEY=VALUE")]
+    pub set: Vec<String>,
+
     /// Which Vulkan adapter to render on.
     ///
     /// `auto` prefers a GPU and falls back to software rendering with a warning.
