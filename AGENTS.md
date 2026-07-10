@@ -28,7 +28,8 @@ If a request does not serve the brief in VISION.md §1, it belongs in the backlo
 5. **Verify** - run focused checks first, then `./scripts/quality.sh` when
    practical.
 6. **Handoff** - summarize changed behavior, files, checks, skipped checks, and
-   residual risks.
+   residual risks; update and close the GitHub issue the task tracks
+   (`docs/PROCESS.md`, Issue Tracking).
 
 ## Planning and Design
 
@@ -140,3 +141,8 @@ Before handing work back:
 - State which tests or checks were run.
 - State any checks that were skipped and why.
 - Call out remaining risks or follow-up work.
+- Close the GitHub issue the task tracks, with a comment naming the behavior,
+  merge commit, and tests — and tick its checkbox in the owning RFC. An issue
+  left open after its work landed misleads everyone reading the milestone.
+- Judge completion by the local quality gate, not remote CI. CI is advisory in
+  this project; never wait for or gate on it.

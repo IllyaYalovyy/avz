@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Review |
+| Status | Accepted (2026-07-09) |
 | Author(s) | Illya Yalovyy |
 | Supersedes | - |
 | Superseded by | - |
@@ -139,6 +139,17 @@ specific to this RFC:
   `start_frame / fps`, not the seconds the user typed, which may fall between two
   frames. It reaches ffmpeg as an `-ss` in front of the mp3 input, which seeks
   and still copies: `-c:a copy` is never traded away for a sampled render.
+- **Remote CI is advisory** (owner decision, 2026-07-09). The local
+  `./scripts/quality.sh` gate — tests plus the invariant hooks in
+  `scripts/quality.d/` — is the authority for "done". The workflow Step 10
+  added stays as a safety net, but nothing waits on it, no branch protection
+  gates on it, and no further CI/CD investment is planned for v0.1.
+- **Issues close with the work** (owner decision, 2026-07-09). A step's GitHub
+  issue is part of its definition of done: tick the checkbox here in the same
+  change, and close the issue with a comment naming the behavior, merge
+  commit, and tests once it is on `origin/main` (`docs/PROCESS.md`, Issue
+  Tracking). Issues #1–#10 predate this rule and were closed retroactively by
+  the owner.
 
 ## Testing Strategy
 

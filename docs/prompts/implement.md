@@ -20,12 +20,21 @@ Implementation constraints:
 
 Verification:
 - Run focused tests first.
-- Run ./scripts/quality.sh before handoff when practical.
+- Run ./scripts/quality.sh before handoff when practical. The local gate is
+  authoritative; do not wait for or gate on remote CI.
 - If checks cannot run, explain why and identify the residual risk.
+
+Completion:
+- Tick the task's checkbox in the owning RFC's development plan as part of the
+  change.
+- After the work lands on main, close the GitHub issue with a comment naming
+  the behavior, merge commit, and tests (docs/PROCESS.md, Issue Tracking). If
+  you cannot close it, say so in the final response.
 
 Final response:
 - Summarize changed behavior.
 - List important files changed.
 - List tests/checks run.
 - List skipped checks and remaining risks.
+- Confirm the GitHub issue was closed, or say why it was not.
 ```

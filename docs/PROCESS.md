@@ -68,6 +68,27 @@ A change is done when:
 - `./scripts/quality.sh` passes or failures are explained
 - Review feedback is resolved
 - Known follow-up work is tracked
+- The GitHub issue the work tracks is updated and closed (see Issue Tracking)
+
+The local quality gate is the authority. Remote CI is advisory for this
+project: do not wait for it, gate on it, or invest in it beyond what exists.
+
+## Issue Tracking
+
+Work that maps to a GitHub issue is not done until the issue says so. When the
+change lands on `main`:
+
+1. Tick the matching development-plan checkbox in the owning RFC as part of the
+   change itself (same branch, before merging).
+2. After the merge is on `origin/main`, close the issue with a comment naming
+   the behavior that landed, the merge commit, and the tests that cover it:
+   `gh issue close <n> --comment "..."`.
+3. If anything in the issue was descoped or deferred, say so in the comment and
+   track it (new issue or backlog label) instead of letting it silently drop.
+
+If `gh` is unavailable, state that in the handoff so a human can close the
+issue — an issue that stays open after its work landed misleads everyone
+reading the milestone.
 
 ## Design Discipline
 
