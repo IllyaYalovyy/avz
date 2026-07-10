@@ -12,6 +12,31 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`ink` preset.** Ink is dropped into still water on every onset, spreads, feeds
+  on the clean water around it, starves where the water is already black, and
+  dissolves everywhere else. What is left is a slow, brooding marble that never
+  repeats. `rms_env` is the growth rate: a loud passage makes the ink invade, and
+  a silence dissolves it back to the backdrop. The last preset deferred by RFC-001
+  NG1, which closes that non-goal — and, as it predicted, it needed no new binding.
+  A reaction-diffusion reads the previous frame, and `needs_feedback` already
+  bound it. Three files in `presets/` and one registry row.
+
+  The field lives in the **alpha channel**, which for a premultiplied layer
+  (`VISION.md` §5.3) is not a trick but an identity: the alpha *is* the ink's
+  density, and the RGB is what that density looks like under the palette. So a
+  palette change repaints the ink instead of smearing old colors into it, and
+  `ink` cannot blow the frame out — it can never emit more light than it covers.
+  The model is Gray-Scott with its solvent eliminated; `crowd` above 1.0 is what
+  keeps the frame from filling, since a pixel whose neighbourhood is already dense
+  starves, stops growing, and hollows out while its front eats outward.
+
+  `steps` is a *reaction* sub-step, not a render pass. The reaction is local and
+  stiff and takes `steps` Euler steps inside the one fragment shader; the
+  diffusion takes exactly one, at the lattice's stability limit, because mixing
+  twice toward a frozen 3×3 blur only gets closer to that same blur. Iterating it
+  for real would mean drawing the preset `steps` times a frame — a change to the
+  render contract. Recorded in RFC-001 NG1.
+
 - **`kaleido` preset.** The frame is cut into wedges around its centre and every
   wedge is made a reflection of its neighbour, so the petals, rings, and grain
   drawn inside one are drawn symmetrically in all of them. The fold turns, the
@@ -70,6 +95,28 @@ when no API moved, because a config checked into an album repo is an API.
   filtering rounds differently per driver. Generic, not `ribbons`-specific, and
   independent of `needs_feedback`: a preset may ask for either, both, or
   neither. This is the last generic binding RFC-001 planned.
+
+### Fixed
+
+- **The feedback texture cleared to opaque black before the first frame.** The
+  previous-frame history is a premultiplied layer, and before frame 0 there is no
+  layer, so its coverage is zero — but `Feedback::new` cleared it to
+  `wgpu::Color::BLACK`, whose alpha is 1, while every other surface in the
+  renderer already cleared to transparent black. `nebula` averages the trail's
+  alpha into its own coverage, so every `nebula` render (and every `--sample`
+  excerpt of one) opened by hiding the background layer behind a sheet of opaque
+  black that faded down over the first frames, rather than fading the clouds up
+  out of the backdrop. Found while writing `ink`, which carries its state in the
+  alpha channel and would have started every render saturated with ink it never
+  drew.
+
+### Breaking changes
+
+- **`nebula` renders differently near the start of a render.** The feedback fix
+  above changes the first frames of any `nebula` render — the opening no longer
+  fades down from black — and its golden hashes moved at frames 0, 10, and 100.
+  Same input and same config, different video, as the preamble warns. No config
+  key changed.
 
 ## [0.1.0] - unreleased
 

@@ -317,6 +317,63 @@ that: turn the other two clocks off and the frame must still change, or the hue
 was wired to `centroid` alone and the preset is a still picture under a held
 chord.
 
+**A preset whose picture is its own history.** `ink` is the only preset whose
+state at frame `N` is a hundred rounds of feedback deep, so a golden hash of one
+frame says almost nothing: any shader that boils differently every frame would
+satisfy it. Five tests carry the risk, and each names a way `ink` could hash green
+and be wrong.
+
+`the_loudness_of_the_song_is_the_growth_rate` renders two fields whose features
+differ in `rms_env` and nothing else. Under the loud one the drop takes hold and
+the reaction runs away; under the quiet one the same drop, fed the same blooms and
+stirred the same way, never reaches the density it needs to survive its own
+dissolving. `VISION.md` §6 writes one sentence about how `ink` should move, and
+this is it. A golden hash would be satisfied by `rms_env` moving the picture *at
+all*, and `param_reaches_declared_uniform_slot` never moves a feature.
+
+`the_ink_dissolves_back_to_the_backdrop_when_the_song_stops` is the sharpest
+feedback test in the suite, because of the control it renders. Sixty loud frames
+grow a dense field, then the music stops. `never_played` is fed *the same silent
+features on the same frame* as the frame after the last note, and differs only in
+the sixty frames before it, which it spent in silence. A memoryless shader cannot
+tell the two apart and must draw them alike; `ink` draws a dense field and clear
+water. That is "the picture at frame `N` is a function of the frames before it",
+stated so it can fail. The test measures peak density rather than counting dense
+pixels: the plateau a blob settles on sits just above any fixed threshold, so a
+count falls off a cliff on the first frame of decay while the ink is plainly still
+there.
+
+`diffusion_is_the_only_way_the_ink_leaves_the_drop_that_threw_it` turns off the
+blooms and the stirring, leaving one drop bounded inside a known radius. A shader
+that read only its *own* texel of the previous frame would still grow, still react
+to every feature, still dissolve into silence, and still hash green — it would
+simply never spread, and `ink` would be a preset about a circle. Only crossing
+that radius proves the diffusion stencil reads its neighbours.
+
+`more_reaction_sub_steps_advance_the_reaction_further_in_the_same_frames` pins
+`steps` to the growth term rather than to *a* pixel, which is all
+`param_reaches_declared_uniform_slot` can see — a `steps` wired to the hue would
+pass that. The measure is density, not spread: more sub-steps grow *less* area,
+because the reaction is bistable and every extra step also eats the thin ink below
+its threshold. It is checked against the shipped `steps = 4` and not the maximum 8
+on purpose. Past the point where fronts meet, more steps grow *fewer* dense pixels,
+since `crowd` starves a blob's interior and hollows it out — that hollowing is the
+reaction-diffusion look, so the honest claim is monotone only up to it.
+
+`ink_is_reproducible_from_its_seed_and_its_frames` is `AGENTS.md` determinism
+through the one preset that could plausibly lose it. Two renders of the same frames
+must agree exactly, so no wall clock and no unseeded randomness survives a hundred
+rounds of feedback; two seeds must disagree, so `--seed` reaches the blooms rather
+than being plumbed through every layer and dropped by the last.
+
+`the_feedback_texture_is_transparent_on_the_first_frame` guards the binding rather
+than the preset. Its sibling `the_feedback_texture_is_black_on_the_first_frame`
+reads only RGB, and the two clear colors it cannot distinguish —
+`wgpu::Color::BLACK` and `wgpu::Color::TRANSPARENT` — differ in the one channel
+`ink` stores its whole field in. That gap is exactly where the bug in CHANGELOG's
+Fixed section lived: an opaque history made every `nebula` render open behind a
+sheet of black, and no test in the suite said so.
+
 The Rust side of that boundary is
 `globals_layout_matches_wgsl`, which pins every member's byte offset — the
 uniform is encoded by hand, field by field, since `avz-core` is
@@ -547,6 +604,12 @@ exists, or `TODO` / `manual` with a reason.
 | A preset carries state between draws | Frame `N` depends on the driver's rounding on frames `0..N`; `--sample` renders different pixels than a full render | Integration (pixels) | `particles_renders_a_frame_the_same_whether_or_not_the_frames_before_it_were_drawn` |
 | `kaleido` stops folding, or folds into a different number of wedges than its schema declares | The golden hashes bless a preset that draws petals and rings with no symmetry in them, and `segments` is decoration | Integration (pixels) | `kaleido_folds_the_frame_into_the_wedges_it_declares`, `a_mirrored_fold_reflects_the_frame_across_its_axis` |
 | A shader reads the clock somewhere other than the knobs that name one | A golden hash pins one frame and cannot see it; the render still looks right and stops being reproducible from its config | Integration (pixels) | `the_only_clocks_kaleido_reads_are_the_three_knobs_that_name_one`, `the_hue_cycles_with_time_under_features_that_do_not_move` |
+| The feedback texture is cleared to an opaque color | The history is a premultiplied layer with zero coverage; an opaque clear hides the backdrop behind black for the first frames of every feedback render, and saturates a preset that stores its state in alpha | Integration (pixels) | `the_feedback_texture_is_transparent_on_the_first_frame` |
+| `ink` recomputes its field from the current frame's features instead of growing it from the previous frame | A memoryless boil that reacts to every feature and hashes green; the reaction-diffusion is decoration | Integration (pixels) | `the_ink_dissolves_back_to_the_backdrop_when_the_song_stops` |
+| `ink`'s diffusion stencil reads only its own texel | The field grows and dissolves correctly but never spreads; every golden hash still passes and the preset is a circle | Integration (pixels) | `diffusion_is_the_only_way_the_ink_leaves_the_drop_that_threw_it` |
+| `ink`'s `steps` is wired to something other than the reaction | `param_reaches_declared_uniform_slot` passes on a `steps` that changes the hue; the knob that buys the reaction-diffusion look buys nothing | Integration (pixels) | `more_reaction_sub_steps_advance_the_reaction_further_in_the_same_frames` |
+| `rms_env` stops being `ink`'s growth rate | The one sentence VISION §6 writes about how `ink` moves; any feature moving the picture satisfies a golden hash | Integration (pixels) | `the_loudness_of_the_song_is_the_growth_rate` |
+| A hundred rounds of feedback let a wall clock or an unseeded hash into the field | `--seed` stops reproducing a render, and only `ink` is deep enough for it to show | Integration (pixels) | `ink_is_reproducible_from_its_seed_and_its_frames` |
 | The spectrogram's global normalization divides by a silent song's zero spread | A `NaN` reaches the texture and every ribbon paints black | Unit | `a_silent_song_has_a_zero_spectrum_and_no_nans`, `the_spectrum_is_normalized_into_the_unit_interval` |
 | `--seed` never reaches the shader's noise | Two seeds render the same video; `--seed` is decoration | Integration (pixels) | `different_seed_different_hash` |
 | A golden test renders on a hardware adapter | The committed hashes are a hash of one laptop; the test fails everywhere else for reasons that look like shader bugs | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |

@@ -180,6 +180,48 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     );
 }
 
+/// And black in the alpha channel too: before frame 0 there is no previous frame,
+/// and a premultiplied layer of nothing is *transparent* black.
+///
+/// The distinction is the whole of `wgpu::Color::BLACK` versus
+/// `wgpu::Color::TRANSPARENT`, which differ in one channel that no shader above
+/// reads. It is not a nicety. A trail preset averages the previous frame's alpha
+/// into this one's coverage, so an opaque history makes the opening half-second
+/// of *every* feedback render an opaque sheet over the background layer, fading
+/// down to the trail rather than up from the backdrop. And a preset that carries
+/// its state in the alpha channel — `ink` does; the ink's density is exactly how
+/// much of the backdrop it hides — would find its first frame already saturated
+/// with ink it never drew.
+///
+/// The shader below writes the alpha it sampled straight back out, so the
+/// compositor cannot hide it: an opaque history composites opaque.
+#[test]
+fn the_feedback_texture_is_transparent_on_the_first_frame() {
+    let mirror = preset(
+        "alpha-mirror",
+        r"
+@fragment
+fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
+    let uv = position.xy / g.resolution;
+    let seen = textureSample(previous, previous_sampler, uv).a;
+    // `params[0].x` keeps the schema honest; it contributes nothing.
+    return vec4<f32>(vec3<f32>(seen), seen + g.params[0].x * 0.0);
+}",
+        true,
+    );
+
+    let frame = render_sequence(&mirror, 1);
+
+    let opaque = frame.chunks_exact(4).filter(|px| px[3] != 0).count();
+    assert_eq!(
+        opaque, 0,
+        "frame 0 sampled alpha {} from the feedback texture, not 0: it is cleared \
+         to opaque black, and every feedback preset opens by covering the \
+         background layer with it",
+        frame[3],
+    );
+}
+
 /// Frame N samples frame N-1. A shader that adds a constant every frame must
 /// therefore climb, and keep climbing: that is the whole of a trail effect.
 #[test]

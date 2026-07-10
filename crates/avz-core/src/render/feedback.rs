@@ -3,7 +3,8 @@
 //! The one binding a preset may ask the renderer for beyond the uniform
 //! (`VISION.md` §6). A preset opts in with `"needs_feedback": true` in its
 //! schema; the renderer then binds last frame's pixels at `@binding(1)` and a
-//! sampler at `@binding(2)`, and clears them to black before the first frame.
+//! sampler at `@binding(2)`, and clears them to transparent black before the
+//! first frame.
 //!
 //! Generic, not `nebula`-specific: `ink`, `ribbons`, and every deferred preset
 //! that wants a trail reuses exactly this (RFC-001 NG1).
@@ -35,12 +36,20 @@ pub struct Feedback {
 }
 
 impl Feedback {
-    /// A `width × height` history texture, cleared to black.
+    /// A `width × height` history texture, cleared to transparent black.
     ///
     /// The clear is explicit rather than left to wgpu's lazy zero-initialization,
     /// because "frame 0 sees black" is a contract presets are written against
-    /// (`the_feedback_texture_is_black_on_the_first_frame`), not an accident of
-    /// what the driver hands back.
+    /// (`the_feedback_texture_is_black_on_the_first_frame` and
+    /// `the_feedback_texture_is_transparent_on_the_first_frame`), not an accident
+    /// of what the driver hands back.
+    ///
+    /// *Transparent* black, and not `wgpu::Color::BLACK`, whose alpha is 1. The
+    /// history is a premultiplied layer (`VISION.md` §5.3) and before frame 0
+    /// there is no layer, so its coverage is zero. Clearing the alpha to one
+    /// makes every feedback render open by hiding the background behind a sheet
+    /// of black that fades down over the first frames, and makes a preset that
+    /// carries its state in the alpha channel — `ink` — start saturated.
     pub fn new(gpu: &Gpu, width: u32, height: u32) -> Self {
         let texture = gpu.device().create_texture(&wgpu::TextureDescriptor {
             label: Some("avz feedback"),
@@ -88,7 +97,7 @@ impl Feedback {
                 depth_slice: None,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                     store: wgpu::StoreOp::Store,
                 },
             })],

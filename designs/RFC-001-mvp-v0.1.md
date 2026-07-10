@@ -38,11 +38,12 @@ developed test-first per `docs/TESTING.md`.
 - **NG1** - The four remaining v1 presets (`ribbons`, `particles`, `kaleido`,
   `ink`) and the spectrum texture binding only `ribbons` consumes. Tracked as
   backlog issues; adding them later must not require core changes (that is G3).
-  **Partly landed post-MVP (issues #24, #25, #26):** the spectrum texture binding
+  **Landed post-MVP (issues #24, #25, #26, #27):** the spectrum texture binding
   and `ribbons`, then the onset-history binding and `particles`, then `kaleido`
-  on no binding at all. The two bindings were core work, as this non-goal
-  anticipated; all three presets were three files in `presets/`, which is G3
-  holding. `ink` remains.
+  on no binding at all, then `ink` on the feedback texture that already existed.
+  The two bindings were core work, as this non-goal anticipated; all four presets
+  were three files in `presets/`, which is G3 holding. This non-goal is now
+  closed.
 
   The onset-history binding was *not* planned — #24 landed believing the spectrum
   was the last generic binding this design would need. `particles` proved
@@ -68,6 +69,36 @@ developed test-first per `docs/TESTING.md`.
   three optional bindings, and its diff is the first to touch `presets/` and the
   docs alone. Reading the layer beneath a preset would be a change to the
   compositor's contract, and belongs in an RFC rather than in a shader.
+
+  **#27 confirmed it for `ink` too, and found a bug in the binding it reuses.** A
+  reaction-diffusion reads the previous frame, and `needs_feedback` already binds
+  it, so `ink` needed no fourth binding. But `Feedback::new` cleared the history
+  to `wgpu::Color::BLACK`, whose alpha is 1, while every other surface in the
+  renderer clears to transparent black. The history is a *premultiplied* layer
+  (§5.3), and before frame 0 there is no layer, so its coverage is zero. An opaque
+  clear made `nebula` open by hiding the backdrop behind a sheet of black that
+  faded down over the first frames, and would have made `ink` — whose field *is*
+  the alpha channel — start every render saturated. Fixed in #27; the clear is now
+  `wgpu::Color::TRANSPARENT` and `nebula`'s golden hashes moved with it.
+
+  `ink` also settles what "a couple of feedback iterations per output frame" costs.
+  Iterating the *diffusion* would mean drawing the preset `steps` times per frame:
+  a change to the render contract, a full-frame copy per iteration, and the 8-bit
+  state quantized `steps` times instead of once. It would also buy nothing, since
+  mixing toward a frozen 3×3 blur twice only gets closer to that same blur. So the
+  diffusion takes one step per frame at the lattice's stability limit, and the
+  *reaction* — local, stiff, and where the pattern comes from — takes `steps` of
+  them inside the one fragment shader. No core change, and `steps` stays a
+  schema parameter rather than a render-graph decision.
+
+  `ink`'s `perf_hint`, like `nebula`'s, is a measurement and not a guess. Measured
+  on lavapipe at 720p over 150 frames, `steps = 8` costs 2799 ms of render phase
+  against 2593 ms for `steps = 1` — under 10% for eight times the reaction, because
+  the nine texture samples and the frame readback dominate and the reaction loop is
+  cheap ALU. `ink` at 720p (2657 ms) is also no costlier than `nebula` (2649 ms)
+  and well under `particles` (4124 ms), so the hint claims neither. It names `steps`
+  only to disclaim it, and sends the reader to `--sample` and the resolution, which
+  are what pay: 1080p is a little over twice the work of 720p.
 - **NG2** - Looped background video. The layer-stack design accounts for it, but
   the second-ffmpeg-reader thread ships post-MVP.
 - **NG3** - Codec matrix beyond x264 (`--codec x265|av1` deferred; `--quality`

@@ -1777,6 +1777,433 @@ fn kaleido_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
     );
 }
 
+/// A loud, sustained passage: the material `ink` grows out of. `rms_env` is the
+/// growth rate (`VISION.md` §6), so this is the field being fed.
+fn loud() -> FeatureFrame {
+    FeatureFrame {
+        rms_env: 0.90,
+        bass_env: 0.35,
+        low_mid_env: 0.55,
+        mid_env: 0.45,
+        high_env: 0.40,
+        air_env: 0.25,
+        flux: 0.10,
+        centroid: 0.35,
+        ..FeatureFrame::default()
+    }
+}
+
+/// The same passage played quietly. Only `rms_env` moves, so anything the two
+/// render differently is something `rms_env` drives and nothing else does.
+fn quiet() -> FeatureFrame {
+    FeatureFrame {
+        rms_env: 0.05,
+        ..loud()
+    }
+}
+
+/// A hit on frame 0 — the drop of ink the field grows from — and `sustain` for
+/// every frame after it.
+///
+/// `onset` is 1.0 on exactly the frame the flux peaked (`analysis::onset`), so the
+/// drop happens once and never repeats. Everything below therefore watches one
+/// drop of ink live out its life, which is the only way to see a reaction.
+fn a_drop_then(sustain: FeatureFrame) -> impl Fn(usize) -> FeatureFrame {
+    move |index| {
+        if index == 0 {
+            FeatureFrame {
+                onset: 1.0,
+                ..sustain
+            }
+        } else {
+            sustain
+        }
+    }
+}
+
+/// `ink` drawn from frame 0 through frame `frames`, and read back over no
+/// backdrop.
+///
+/// A feedback preset has no other kind of frame: what comes back is the whole
+/// history, which is the point. No backdrop, so a test may read "no ink here" off
+/// a pixel's alpha rather than off the palette gradient the compositor would have
+/// put under it.
+fn ink_field(
+    frames: usize,
+    seed: u64,
+    features: impl Fn(usize) -> FeatureFrame,
+    overrides: &[(&str, toml::Value)],
+) -> Vec<u8> {
+    let ink = Preset::by_name("ink").expect("ink ships");
+
+    let mut table = toml::Table::new();
+    for (name, value) in overrides {
+        table.insert((*name).to_owned(), value.clone());
+    }
+    let params = ink
+        .schema()
+        .expect("the shipped schema parses")
+        .resolve(&table)
+        .expect("the overrides are in range");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, ink, ember(), None);
+
+    for index in 0..=frames {
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDTH, HEIGHT),
+            seed,
+            features(index),
+            ember(),
+            params,
+        );
+        stage.draw(&gpu, &globals, &silent_spectrum(), &silent_onsets());
+    }
+
+    stage.read(&gpu)
+}
+
+/// How many pixels of `frame` carry *grown* ink, past the density the reaction
+/// only reaches by running away with itself.
+fn grown(frame: &[u8]) -> usize {
+    frame.chunks_exact(4).filter(|pixel| pixel[3] > 128).count()
+}
+
+/// How much of the backdrop the ink hides where it is thickest, out of 255.
+///
+/// [`grown`] cannot see a field that is thinning uniformly: the plateau a dense
+/// blob settles on sits just above its threshold, so the first frame of decay
+/// carries every pixel across at once and the count falls off a cliff. The peak
+/// density falls smoothly, and is what "there is still ink here" means.
+fn thickest(frame: &[u8]) -> u8 {
+    frame
+        .chunks_exact(4)
+        .map(|pixel| pixel[3])
+        .max()
+        .expect("the frame has pixels")
+}
+
+/// How far the ink reaches from the centre of `frame`, in the shader's own units
+/// where the short edge spans 1.0.
+fn ink_reach(frame: &[u8]) -> f32 {
+    let (width, height) = (WIDTH as usize, HEIGHT as usize);
+    let short = WIDTH.min(HEIGHT) as f32;
+
+    frame
+        .chunks_exact(4)
+        .enumerate()
+        .filter(|(_, pixel)| pixel[3] > 2)
+        .map(|(index, _)| {
+            let x = (index % width) as f32 + 0.5 - 0.5 * WIDTH as f32;
+            let y = (index / width) as f32 + 0.5 - 0.5 * height as f32;
+            (x * x + y * y).sqrt() / short
+        })
+        .fold(0.0, f32::max)
+}
+
+/// How far from the centre of the frame the onset drops its ink, from `ink.wgsl`.
+/// Nothing but diffusion can carry the field past it.
+const DROP_RADIUS: f32 = 0.34;
+
+/// `ink` grows out of the frame before it and asks the renderer for nothing else.
+///
+/// RFC-001 NG1 predicted this: a reaction-diffusion reads the previous frame, and
+/// the previous frame already exists. So the feedback texture must be declared —
+/// a shipped `ink` that forgot to would compile, render a memoryless boil, and
+/// have its golden hashes blessed — and the other two bindings must not be, since
+/// each costs a texture and an upload on every frame of every render.
+///
+/// `ink` also carries a `perf_hint`, because `steps` is the knob a user reading
+/// "reaction sub-steps per frame" will reach for first, and it is the wrong one.
+/// Measured on lavapipe at 720p, eight sub-steps cost under 10% more than one —
+/// the nine texture samples and the readback dominate, and the reaction loop is
+/// cheap ALU. So the hint has to name `steps` in order to *disclaim* it, and point
+/// at `--sample` and the resolution, which are what actually pay. `docs/RELEASE.md`
+/// requires the numbers in a hint to be re-measured rather than re-read; whether
+/// the hint is *true* is that checklist's job, and only its shape is asserted here.
+#[test]
+fn ink_grows_from_the_previous_frame_and_asks_for_no_other_texture() {
+    let ink = Preset::by_name("ink").expect("ink ships");
+    let schema = ink.schema().expect("the shipped schema parses");
+
+    assert!(schema.needs_feedback, "ink grows out of the previous frame");
+    assert!(!schema.needs_spectrum, "ink reads no spectrum");
+    assert!(!schema.needs_onsets, "ink reads no onset history");
+
+    let hint = schema
+        .perf_hint
+        .expect("`steps` invites a user to tune the wrong knob; the hint says so");
+    assert!(
+        hint.contains("steps"),
+        "the perf hint does not mention `steps`, which is the knob a reader of this \
+         schema will reach for and the one that buys the least: {hint}",
+    );
+    assert!(
+        hint.contains("--sample"),
+        "the perf hint sends the user to no lever that actually pays: {hint}",
+    );
+}
+
+/// The loudness of the song is the growth rate (`VISION.md` §6): the one sentence
+/// the brief writes about how `ink` should move.
+///
+/// Two renders whose features differ in `rms_env` and in nothing else. Under the
+/// loud one the drop takes hold and the reaction runs away with itself; under the
+/// quiet one the same drop of ink, fed the same blooms and stirred the same way,
+/// never reaches the density it needs to survive its own dissolving.
+///
+/// A golden hash cannot see this — `rms_env` moving the picture *at all* would
+/// satisfy it — and neither can `param_reaches_declared_uniform_slot`, which never
+/// moves a feature.
+#[test]
+fn the_loudness_of_the_song_is_the_growth_rate() {
+    const FRAMES: usize = 30;
+
+    let played = ink_field(FRAMES, GOLDEN_SEED, a_drop_then(loud()), &[]);
+    let whispered = ink_field(FRAMES, GOLDEN_SEED, a_drop_then(quiet()), &[]);
+
+    assert!(
+        grown(&played) > 5_000,
+        "after {FRAMES} loud frames only {} pixels carry grown ink: the drop never \
+         took hold",
+        grown(&played),
+    );
+    assert_eq!(
+        grown(&whispered),
+        0,
+        "the same drop, under a passage quiet in nothing but its `rms_env`, grew \
+         {} pixels of dense ink: the loudness is not the growth rate",
+        grown(&whispered),
+    );
+}
+
+/// And when the song stops, the ink lets the backdrop back.
+///
+/// Sixty loud frames grow a dense field; sixty silent ones must dissolve it. This
+/// is what makes `ink` a preset and not a stain: the alpha it writes is the
+/// backdrop's coverage (`VISION.md` §5.3), so a field that never dissolved would
+/// leave a silent outro behind a sheet of ink.
+///
+/// It is also the sharpest feedback test in this file, because of the control it
+/// renders. `never_played` is fed *the same silent features on the same frame* as
+/// `a_frame_later` — it differs only in the sixty frames before it, which it spent
+/// in silence rather than in music. A memoryless shader cannot tell the two apart
+/// and must draw them alike. `ink` draws a dense field and clear water: the
+/// picture at frame N is a function of the frames before it and not of frame N's
+/// features. No golden hash of a single frame would notice the difference.
+#[test]
+fn the_ink_dissolves_back_to_the_backdrop_when_the_song_stops() {
+    const GROWN_FOR: usize = 60;
+
+    let playing = |index: usize| a_drop_then(loud())(index);
+    let then_silence = |index: usize| {
+        if index <= GROWN_FOR {
+            playing(index)
+        } else {
+            FeatureFrame::default()
+        }
+    };
+
+    let at_the_last_note = ink_field(GROWN_FOR, GOLDEN_SEED, playing, &[]);
+    let a_frame_later = ink_field(GROWN_FOR + 1, GOLDEN_SEED, then_silence, &[]);
+    let never_played = ink_field(GROWN_FOR + 1, GOLDEN_SEED, |_| FeatureFrame::default(), &[]);
+    let two_seconds_later = ink_field(GROWN_FOR + 60, GOLDEN_SEED, then_silence, &[]);
+
+    assert!(
+        grown(&at_the_last_note) > 5_000,
+        "sixty loud frames grew only {} pixels of dense ink",
+        grown(&at_the_last_note),
+    );
+
+    // The field decays fast enough that the dense-pixel *count* falls off a cliff
+    // on this frame — the plateau sits just over `grown`'s threshold. What must
+    // survive the first silent frame is the ink itself, and what says so is how
+    // much backdrop it still hides.
+    assert!(
+        thickest(&a_frame_later) > 100,
+        "one silent frame took the ink down to {}/255 at its thickest: the field is \
+         not carried from the frame before",
+        thickest(&a_frame_later),
+    );
+    assert!(
+        thickest(&never_played) < 10,
+        "sixty-one silent frames grew ink {}/255 thick on their own: the control is \
+         not clear water, so `a_frame_later` proves nothing about memory",
+        thickest(&never_played),
+    );
+
+    assert!(
+        thickest(&two_seconds_later) < 20,
+        "two seconds into the silence the ink still covers {}/255 of the backdrop at \
+         its thickest: it does not dissolve",
+        thickest(&two_seconds_later),
+    );
+}
+
+/// Diffusion is the only way the ink can leave the drop that threw it.
+///
+/// The onset drops its ink inside `r < DROP_RADIUS` and nothing else in the shader
+/// puts any outside — the blooms are turned off here, and so is the stirring. So
+/// the field can only cross that circle by bleeding across it, one texel per
+/// frame, which is the diffusion half of a reaction-diffusion.
+///
+/// Nothing else in this file would notice its absence. A shader that read only its
+/// own texel of the previous frame would still grow, still react to every feature,
+/// still dissolve into silence, and still have its golden hashes blessed — it
+/// would simply never spread, and `ink` would be a preset about a circle.
+#[test]
+fn diffusion_is_the_only_way_the_ink_leaves_the_drop_that_threw_it() {
+    const FRAMES: usize = 60;
+
+    let still_water = [
+        ("swirl", toml::Value::Float(0.0)),
+        ("seed_rate", toml::Value::Float(0.0)),
+    ];
+    let mut sealed = still_water.to_vec();
+    sealed.push(("diffusion", toml::Value::Float(0.0)));
+
+    let bleeding = ink_reach(&ink_field(
+        FRAMES,
+        GOLDEN_SEED,
+        a_drop_then(loud()),
+        &still_water,
+    ));
+    let sealed = ink_reach(&ink_field(
+        FRAMES,
+        GOLDEN_SEED,
+        a_drop_then(loud()),
+        &sealed,
+    ));
+
+    assert!(
+        sealed < DROP_RADIUS,
+        "with `diffusion = 0` the ink reached {sealed:.3} from the centre, past the \
+         {DROP_RADIUS} the drop covers: something other than diffusion moves the field",
+    );
+    assert!(
+        bleeding > DROP_RADIUS,
+        "after {FRAMES} frames the ink has reached {bleeding:.3} from the centre and \
+         the drop covers {DROP_RADIUS}: the field never left the disc it was dropped \
+         in, so the shader reads no neighbour of the previous frame",
+    );
+}
+
+/// The reaction sub-steps are what advance the reaction, and the issue asked for
+/// them by name: "a couple of feedback iterations per output frame for the RD
+/// look".
+///
+/// One Euler step of the reaction per frame barely moves the field; the shipped
+/// four get it further in the same thirty frames — more of the frame grown dense,
+/// and a peak density one step never reaches, because the growth term is stepped
+/// four times against one frame's worth of dissolving.
+///
+/// The measure is density, not spread. More sub-steps grow *less* area, not more:
+/// the reaction is bistable, so every extra step also eats the thin ink that sits
+/// below its threshold, sharpening fronts rather than pushing them outward. Only
+/// diffusion spreads the field, which is
+/// `diffusion_is_the_only_way_the_ink_leaves_the_drop_that_threw_it`.
+///
+/// Against the shipped `steps = 4` rather than the maximum 8, and not because 8 is
+/// slow: past the point where the fronts meet, more steps grow *fewer* dense
+/// pixels, because `crowd` starves a blob's interior and hollows it out. That
+/// hollowing is the reaction-diffusion look, so the monotone claim is the one
+/// below and not "more steps, more ink, forever".
+///
+/// `param_reaches_declared_uniform_slot` proves only that `steps` changes *a*
+/// pixel, which a `steps` wired to the hue would also do.
+#[test]
+fn more_reaction_sub_steps_advance_the_reaction_further_in_the_same_frames() {
+    const FRAMES: usize = 30;
+
+    let once = ink_field(
+        FRAMES,
+        GOLDEN_SEED,
+        a_drop_then(loud()),
+        &[("steps", toml::Value::Integer(1))],
+    );
+    let four_times = ink_field(
+        FRAMES,
+        GOLDEN_SEED,
+        a_drop_then(loud()),
+        &[("steps", toml::Value::Integer(4))],
+    );
+
+    assert!(
+        grown(&four_times) > grown(&once) * 6 / 5,
+        "four reaction sub-steps a frame grew {} pixels of dense ink and one grew \
+         {}: the sub-steps do not advance the reaction",
+        grown(&four_times),
+        grown(&once),
+    );
+    assert!(
+        thickest(&four_times) > thickest(&once),
+        "one sub-step a frame reaches {}/255 at its thickest and four reach {}: the \
+         extra steps buy no density, so they are not stepping the growth term",
+        thickest(&once),
+        thickest(&four_times),
+    );
+}
+
+/// The field at frame `N` is a function of `(seed, features[0..N])` and nothing
+/// else — which is what the issue asks of the reaction-diffusion state, and what
+/// `AGENTS.md` asks of every preset.
+///
+/// Two renders of the same frames agree exactly, so no wall clock and no unseeded
+/// randomness reaches the field through a hundred rounds of feedback. Two seeds
+/// disagree, so `--seed` reaches the blooms the ink grows from rather than being
+/// plumbed through every layer and dropped by the last one.
+#[test]
+fn ink_is_reproducible_from_its_seed_and_its_frames() {
+    const FRAMES: usize = 40;
+
+    let once = ink_field(FRAMES, GOLDEN_SEED, a_drop_then(loud()), &[]);
+    let twice = ink_field(FRAMES, GOLDEN_SEED, a_drop_then(loud()), &[]);
+    let elsewhere = ink_field(FRAMES, GOLDEN_SEED + 1, a_drop_then(loud()), &[]);
+
+    assert_eq!(
+        hex(&once),
+        hex(&twice),
+        "{FRAMES} frames of feedback rendered two different fields from the same \
+         seed and the same features",
+    );
+    assert_ne!(
+        hex(&once),
+        hex(&elsewhere),
+        "two seeds grow the same field: the seed does not reach the blooms",
+    );
+}
+
+/// `--sample 3s --adapter software` must produce stable, non-black, evolving
+/// output, as for every preset before it: that the frame is *lit* without blowing
+/// out. `ink` premultiplies its light by its own coverage, so it cannot blow out
+/// by construction — this is what says the construction is the one that shipped.
+#[test]
+fn ink_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
+    let frame = ink_field(100, GOLDEN_SEED, a_drop_then(loud()), &[]);
+
+    let lit = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] != [0, 0, 0])
+        .count();
+    let white = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] == [255, 255, 255])
+        .count();
+    let total = (WIDTH * HEIGHT) as usize;
+
+    assert!(
+        lit * 4 > total,
+        "after 100 frames only {lit} of {total} pixels are lit: ink renders black",
+    );
+    assert!(
+        white * 4 < total,
+        "{white} of {total} pixels are pure white: the field blew out",
+    );
+}
+
 /// The two moments of the card's envelope that are worth pinning: halfway up the
 /// fade, and fully up during the hold.
 ///
@@ -2325,6 +2752,92 @@ fn dump_kaleido_tuning_frames() {
             &silent_onsets(),
         );
 
+        compositor.composite(&gpu, &target);
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+        let path = out.join(format!("{index:03}.png"));
+        image::RgbaImage::from_raw(WIDE, TALL, pixels)
+            .expect("the frame is WIDE x TALL RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+}
+
+/// The same instrument for `ink`, in `target/ink-tuning/`.
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_ink
+/// ```
+///
+/// A hash says the field did not change; it does not say the field is ink. What
+/// is being looked at is whether the marble reads as something growing in water —
+/// whether the fronts have an edge, whether the interior holds a pattern instead
+/// of filling, and whether a quiet bar gives the backdrop back. So the frames
+/// span a swell, and the last of them are drawn after the song has dropped away.
+///
+/// Every frame from 0 is drawn, because a feedback preset has no other kind of
+/// frame; only the listed ones are written out.
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual tuning pass; asserts nothing"]
+fn dump_ink_tuning_frames() {
+    const WIDE: u32 = 960;
+    const TALL: u32 = 540;
+    const LAST: usize = 300;
+    const KEPT: [usize; 7] = [1, 15, 60, 120, 210, 260, 300];
+
+    let preset = Preset::by_name("ink").expect("ink ships");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/ink-tuning");
+    fs::create_dir_all(&out).expect("create target/ink-tuning");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
+    let background = Backdrop::default().layer(&gpu, WIDE, TALL, ember());
+    let visual = Layer::new(&gpu, WIDE, TALL, "visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual).expect("ink compiles");
+    let compositor = Compositor::new(&gpu, &[&background, &visual]).expect("two 960x540 layers");
+
+    let params = defaults(preset);
+    for index in 0..=LAST {
+        let seconds = index as f32 / FPS as f32;
+        // A swell that breathes once every eight seconds, a hit on the beat — and
+        // then, from seven seconds in, the song drops away and the ink dissolves.
+        let swell = 0.5 + 0.5 * (seconds * 0.8).sin();
+        let playing = f32::from(seconds < 7.0);
+        let features = FeatureFrame {
+            rms_env: (0.35 + 0.55 * swell) * playing,
+            bass_env: swell * playing,
+            low_mid_env: (0.3 + 0.4 * swell) * playing,
+            mid_env: (0.7 - 0.3 * swell) * playing,
+            high_env: 0.5 * swell * playing,
+            air_env: 0.3 * playing,
+            flux: 0.15 * playing,
+            onset: f32::from(index % FPS as usize == 0) * playing,
+            centroid: 0.25 + 0.4 * swell,
+            ..FeatureFrame::default()
+        };
+
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDE, TALL),
+            GOLDEN_SEED,
+            features,
+            ember(),
+            params,
+        );
+        visualizer.draw(
+            &gpu,
+            &visual,
+            &globals,
+            &silent_spectrum(),
+            &silent_onsets(),
+        );
+
+        if !KEPT.contains(&index) {
+            continue;
+        }
         compositor.composite(&gpu, &target);
         let pixels = target.read_rgba(&gpu).expect("the frame reads back");
         let path = out.join(format!("{index:03}.png"));
