@@ -224,6 +224,66 @@ fn a_background_video_exits_2_and_says_it_is_not_built_yet() {
         .stderr(contains("not supported yet"));
 }
 
+/// x264's CRF scale runs 0..=51. A number outside it never reaches ffmpeg —
+/// clap refuses it before avz looks for an encoder at all (`VISION.md` §5.4).
+#[test]
+fn a_quality_outside_the_crf_scale_exits_2() {
+    // An empty `PATH`: had the CRF reached avz's own code, the preflight would
+    // have failed first, with a message about ffmpeg rather than about 51.
+    let no_ffmpeg = tempfile::tempdir().expect("tempdir");
+
+    avz()
+        .env("PATH", no_ffmpeg.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .args(["--quality=52"])
+        .assert()
+        .code(2)
+        .stderr(contains("51"));
+}
+
+/// The same range, written in a config file rather than on the command line.
+/// Both spellings answer to `output.quality`.
+#[test]
+fn a_config_file_quality_outside_the_crf_scale_exits_2() {
+    let ffmpeg = ffmpeg_that_passes_preflight();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("loud.toml");
+    fs::write(&config, "[output]\nquality = 99\n").expect("write");
+
+    avz()
+        .env("PATH", ffmpeg.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--out")
+        .arg(dir.path().join("out.mp4"))
+        .assert()
+        .code(2)
+        .stderr(contains("output.quality"));
+}
+
+/// `--codec av1` parses (RFC-001 NG3 keeps the names) and is refused as
+/// configuration, before the song is decoded — not as an encode failure after.
+#[test]
+fn a_deferred_codec_exits_2_before_anything_is_rendered() {
+    let ffmpeg = ffmpeg_that_passes_preflight();
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    avz()
+        .env("PATH", ffmpeg.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--out")
+        .arg(dir.path().join("out.mp4"))
+        .args(["--codec", "av1"])
+        .assert()
+        .code(2)
+        .stderr(contains("not supported yet"))
+        .stderr(contains("--codec x264"));
+}
+
 // ---------------------------------------------------------------------------
 // 3 — the input file
 // ---------------------------------------------------------------------------
@@ -376,16 +436,10 @@ fn an_ffmpeg_that_is_not_ffmpeg_exits_4() {
         .code(4);
 }
 
-/// A command avz accepts and has not built yet is a pipeline failure, not a
-/// usage error: the arguments were fine (`VISION.md` §9, M0).
-#[test]
-fn an_unimplemented_command_exits_4() {
-    avz()
-        .args(["config", "--example"])
-        .assert()
-        .code(4)
-        .stderr(contains("not implemented"));
-}
+// `config --example` was the last command to answer "not implemented"
+// (`VISION.md` §9, M0). Every subcommand avz accepts now does something, so the
+// exit-4 case that test covered is unreachable from the command line; the
+// mapping itself is still pinned by `exit::tests`.
 
 // ---------------------------------------------------------------------------
 // The shape of every error message

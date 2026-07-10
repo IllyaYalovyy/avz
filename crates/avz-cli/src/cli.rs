@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use avz_core::config::{Palette, SampleRange};
+use avz_core::config::{Codec, MAX_CRF, Palette, SampleRange, Seed};
 use avz_core::render::AdapterChoice;
 use clap::{Args, Parser, Subcommand};
 
@@ -43,18 +43,6 @@ pub enum Command {
 
     /// Work with TOML configuration files.
     Config(ConfigArgs),
-}
-
-impl Command {
-    /// The user-facing name of this subcommand.
-    pub fn name(&self) -> &'static str {
-        match self {
-            Command::Render(_) => "render",
-            Command::Probe(_) => "probe",
-            Command::Presets(_) => "presets",
-            Command::Config(_) => "config",
-        }
-    }
 }
 
 #[derive(Debug, Args)]
@@ -103,6 +91,25 @@ pub struct RenderArgs {
     #[arg(long)]
     pub no_text: bool,
 
+    /// The seed the shader's noise is hashed from: `auto`, or an integer.
+    ///
+    /// `auto` derives it from the song's file name, so re-rendering the same
+    /// song — from another directory, or on another machine — gives the same
+    /// video. Two seeds a number apart give unrelated ones.
+    #[arg(long, value_name = "auto|N")]
+    pub seed: Option<Seed>,
+
+    /// Video codec. avz v0.1 encodes `x264` only.
+    #[arg(long, value_name = "x264")]
+    pub codec: Option<Codec>,
+
+    /// x264 CRF quality, 0 (visually lossless, huge) to 51 (worst).
+    ///
+    /// The default, 18, is safe to upload. Every step of about 6 halves or
+    /// doubles the file size.
+    #[arg(long, value_name = "CRF", value_parser = clap::value_parser!(u8).range(0..=MAX_CRF as i64))]
+    pub quality: Option<u8>,
+
     /// A TOML config file. See `avz config --example` for a documented template.
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,
@@ -139,6 +146,9 @@ pub struct PresetsArgs {
 #[derive(Debug, Args)]
 pub struct ConfigArgs {
     /// Print a documented example config to stdout.
+    ///
+    /// Every key carries its built-in default, so the file it writes renders
+    /// what a bare `avz render` renders: `avz config --example > avz.toml`.
     #[arg(long)]
     pub example: bool,
 }
@@ -153,19 +163,23 @@ mod tests {
         Cli::command().debug_assert();
     }
 
+    /// The four subcommands `VISION.md` §3 names, spelled the way it spells them.
     #[test]
     fn subcommand_names_match_the_ux_contract() {
-        let cli = Cli::try_parse_from(["avz", "render", "song.mp3"]).expect("parses");
-        assert_eq!(cli.command.name(), "render");
+        let command = |argv: [&str; 2]| Cli::try_parse_from(argv).expect("parses").command;
+        let command_with_input =
+            |argv: [&str; 3]| Cli::try_parse_from(argv).expect("parses").command;
 
-        let cli = Cli::try_parse_from(["avz", "probe", "song.mp3"]).expect("parses");
-        assert_eq!(cli.command.name(), "probe");
-
-        let cli = Cli::try_parse_from(["avz", "presets"]).expect("parses");
-        assert_eq!(cli.command.name(), "presets");
-
-        let cli = Cli::try_parse_from(["avz", "config"]).expect("parses");
-        assert_eq!(cli.command.name(), "config");
+        assert!(matches!(
+            command_with_input(["avz", "render", "song.mp3"]),
+            Command::Render(_)
+        ));
+        assert!(matches!(
+            command_with_input(["avz", "probe", "song.mp3"]),
+            Command::Probe(_)
+        ));
+        assert!(matches!(command(["avz", "presets"]), Command::Presets(_)));
+        assert!(matches!(command(["avz", "config"]), Command::Config(_)));
     }
 
     #[test]
@@ -288,6 +302,60 @@ mod tests {
         let args = render_args(&[]);
 
         assert!(args.title.is_none() && args.artist.is_none() && !args.no_text);
+    }
+
+    /// `--seed` takes both spellings `visual.seed` takes, and nothing else.
+    #[test]
+    fn seed_accepts_auto_and_an_integer() {
+        assert_eq!(render_args(&["--seed", "auto"]).seed, Some(Seed::Auto));
+        assert_eq!(render_args(&["--seed", "7"]).seed, Some(Seed::Fixed(7)));
+
+        // `=`, because a bare `-1` is an argument to clap, not a value.
+        let err = Cli::try_parse_from(["avz", "render", "song.mp3", "--seed=-1"])
+            .expect_err("a seed is not negative");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    /// A CRF outside x264's scale is a usage error, caught by clap before
+    /// ffmpeg is even looked for (`VISION.md` §5.4, §8: exit 2).
+    #[test]
+    fn quality_outside_the_crf_scale_is_a_usage_error() {
+        assert_eq!(render_args(&["--quality", "0"]).quality, Some(0));
+        assert_eq!(render_args(&["--quality", "51"]).quality, Some(51));
+
+        // `--quality=N`, because a bare `-1` is an argument to clap, not a value.
+        for out_of_range in ["52", "-1", "300"] {
+            let flag = format!("--quality={out_of_range}");
+            let err = Cli::try_parse_from(["avz", "render", "song.mp3", &flag])
+                .expect_err("a CRF outside 0..=51 is not a quality");
+
+            assert_eq!(
+                err.kind(),
+                clap::error::ErrorKind::ValueValidation,
+                "`--quality {out_of_range}`",
+            );
+        }
+    }
+
+    /// The deferred codecs still *parse* (RFC-001 NG3): the render, not the
+    /// argument parser, is what says they are not supported yet.
+    #[test]
+    fn codec_parses_every_name_and_rejects_the_rest() {
+        assert_eq!(render_args(&["--codec", "x264"]).codec, Some(Codec::X264));
+        assert_eq!(render_args(&["--codec", "av1"]).codec, Some(Codec::Av1));
+
+        let err = Cli::try_parse_from(["avz", "render", "song.mp3", "--codec", "h264"])
+            .expect_err("`h264` is the standard, `x264` is the encoder");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    /// A bare render leaves all three to the config file and the built-in
+    /// defaults, the way `--palette` does.
+    #[test]
+    fn a_bare_render_has_no_opinion_about_the_seed_codec_or_quality() {
+        let args = render_args(&[]);
+
+        assert!(args.seed.is_none() && args.codec.is_none() && args.quality.is_none());
     }
 
     #[test]

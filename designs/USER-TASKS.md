@@ -187,7 +187,13 @@ can be edited and passed straight back to `--config` without further changes.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:**
+`example_parses_under_strict_validation_into_the_built_in_defaults` and
+`every_declared_key_is_documented` (the template covers every key, and resolves
+to the defaults); `config_example_prints_the_template_to_stdout_and_nothing_to_stderr`
+(the redirect above captures a config, not a log);
+`the_example_config_is_accepted_by_render` and `the_example_config_renders_a_playable_mp4`
+(edited or not, it is a config `--config` takes, all the way to an mp4).
 
 ## UT-009: Composite a background and a title card
 

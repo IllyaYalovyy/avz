@@ -76,15 +76,24 @@ const X264_PRESET: &str = "slow";
 
 /// The ffmpeg encoder name for `codec`.
 ///
+/// Public so [`pipeline::render`](crate::pipeline::render) can ask the question
+/// before it decodes the song rather than after: a `--codec av1` render should
+/// fail in its first millisecond, not once every frame has been drawn.
+///
 /// # Errors
 ///
-/// [`Error::Encode`] for the codecs RFC-001 NG3 defers past v0.1. ffmpeg would
+/// [`Error::Config`] for the codecs RFC-001 NG3 defers past v0.1. ffmpeg would
 /// otherwise fail with a message about an unknown encoder, minutes into a
 /// render, and leave the user guessing which spelling it wanted.
-fn video_encoder(codec: Codec) -> Result<&'static str> {
+///
+/// Configuration rather than an encode failure, and therefore exit 2 rather than
+/// exit 4 (`VISION.md` §8): `--codec av1` is a thing the user typed, and it will
+/// fail every song in a batch the same way. This is where `background.video`,
+/// the other v0.1 deferral, already lands.
+pub fn video_encoder(codec: Codec) -> Result<&'static str> {
     match codec {
         Codec::X264 => Ok("libx264"),
-        Codec::X265 | Codec::Av1 => Err(Error::Encode(format!(
+        Codec::X265 | Codec::Av1 => Err(Error::Config(format!(
             "codec `{}` is not supported yet; avz v0.1 encodes x264 only — use `--codec x264`",
             codec.as_str(),
         ))),
@@ -578,7 +587,9 @@ mod tests {
     }
 
     /// RFC-001 NG3 defers x265 and av1. Refusing them here beats emitting an
-    /// argv ffmpeg rejects with a message about an unknown encoder.
+    /// argv ffmpeg rejects with a message about an unknown encoder — and it is
+    /// the user's configuration that is refused (exit 2), not the encoder that
+    /// failed (exit 4).
     #[test]
     fn a_deferred_codec_is_refused_and_names_the_one_that_works() {
         for codec in [Codec::X265, Codec::Av1] {
@@ -592,7 +603,7 @@ mod tests {
             )
             .expect_err("v0.1 encodes x264 only");
 
-            assert!(matches!(err, Error::Encode(_)), "got {err:?}");
+            assert!(matches!(err, Error::Config(_)), "got {err:?}");
             let msg = err.to_string();
             assert!(
                 msg.contains(codec.as_str()),

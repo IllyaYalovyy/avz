@@ -119,6 +119,57 @@ fn a_two_second_software_render_is_a_playable_mp4_with_one_video_and_one_audio_s
     );
 }
 
+/// UT-008 (`designs/USER-TASKS.md`), end to end and through real ffmpeg:
+///
+/// ```bash
+/// avz config --example > avz.toml
+/// avz render song.mp3 --config avz.toml --sample 2s
+/// ```
+///
+/// The template pins `resolution = "1920x1080"`, and a 1080p lavapipe render is
+/// minutes of CI time to learn nothing this test is about. `--set` outranks the
+/// config file (`VISION.md` §5.5), so the frame size is the one thing overruled;
+/// every other key in the template is the one that reaches the render.
+#[test]
+fn the_example_config_renders_a_playable_mp4() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    let template = Command::cargo_bin("avz")
+        .expect("avz binary builds")
+        .args(["config", "--example"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+
+    let config = dir.path().join("avz.toml");
+    fs::write(&config, template).expect("write the template avz just printed");
+
+    Command::cargo_bin("avz")
+        .expect("avz binary builds")
+        .arg("render")
+        .arg(&song)
+        .arg("--config")
+        .arg(&config)
+        .args(["--sample", SAMPLE, "--adapter", "software"])
+        .args(["--set", "output.resolution=320x180"])
+        .assert()
+        .success()
+        .stdout(contains(format!("{FRAMES} frames")));
+
+    let output = dir.path().join("song.mp4");
+    assert!(output.is_file(), "the example config produced no mp4");
+    assert_eq!(stream(&output, "v", "codec_name"), "h264");
+    assert_eq!(
+        stream(&output, "a", "codec_name"),
+        "mp3",
+        "the template must not have talked avz into re-encoding the audio",
+    );
+}
+
 /// Ask `ffprobe` for one entry of every `kind` (`v` or `a`) stream.
 fn stream(file: &Path, kind: &str, entry: &str) -> String {
     ffprobe(file, &["-select_streams", kind], &format!("stream={entry}"))

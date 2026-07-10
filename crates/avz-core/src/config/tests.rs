@@ -746,6 +746,55 @@ fn parses_seed_auto_and_fixed() {
     assert!(err.to_string().contains("negative"), "{err}");
 }
 
+/// `VISION.md` §5.3: the default seed comes from the file *name*, so a song
+/// re-rendered from another directory — or another machine — matches.
+#[test]
+fn the_auto_seed_is_derived_from_the_file_stem_not_the_path() {
+    let here = Seed::Auto.resolve(Path::new("/music/cold-design/track.mp3"));
+    let there = Seed::Auto.resolve(Path::new("/tmp/scratch/track.mp3"));
+    let renamed = Seed::Auto.resolve(Path::new("/music/cold-design/track.flac"));
+
+    assert_eq!(here, there, "the directory must not reach the seed");
+    assert_eq!(
+        here, renamed,
+        "the extension is not part of the name a song is known by",
+    );
+}
+
+/// A seed derived from the name is only worth deriving if two names differ.
+#[test]
+fn different_songs_get_different_auto_seeds() {
+    let one = Seed::Auto.resolve(Path::new("winter.mp3"));
+    let other = Seed::Auto.resolve(Path::new("summer.mp3"));
+
+    assert_ne!(one, other);
+    assert_ne!(one, 0, "a song must not seed the shader with nothing");
+}
+
+/// Pinned, not merely stable within a run: this hash is what makes last year's
+/// render of `track.mp3` reproducible today (`AGENTS.md`, determinism). Changing
+/// it changes every `seed = "auto"` video ever made.
+#[test]
+fn the_auto_seed_hash_is_pinned_across_toolchains() {
+    assert_eq!(
+        Seed::Auto.resolve(Path::new("track.mp3")),
+        0xdec5_98a6_c4eb_90bc,
+        "FNV-1a of `track`",
+    );
+    assert_eq!(
+        Seed::Auto.resolve(Path::new("")),
+        0xcbf2_9ce4_8422_2325,
+        "a path with no stem hashes the empty name, rather than panicking",
+    );
+}
+
+/// An explicit seed is used exactly as written, whatever the file is called.
+#[test]
+fn a_fixed_seed_ignores_the_file_name() {
+    assert_eq!(Seed::Fixed(7).resolve(Path::new("winter.mp3")), 7);
+    assert_eq!(Seed::Fixed(7).resolve(Path::new("summer.mp3")), 7);
+}
+
 #[test]
 fn parses_the_nine_grid_positions() {
     for position in Position::ALL {

@@ -639,6 +639,49 @@ pub enum Seed {
     Fixed(u64),
 }
 
+impl Seed {
+    /// The `u64` a render hashes its noise from (`VISION.md` §5.3).
+    ///
+    /// [`Seed::Auto`] hashes the input's file *stem*, not its path: an album
+    /// re-ripped into a different directory, or fetched onto another machine,
+    /// must render the same video, and a path is neither stable nor portable.
+    /// Two different songs still seed differently, which is the whole reason the
+    /// default is derived from the name rather than being a constant.
+    pub fn resolve(self, input: &std::path::Path) -> u64 {
+        match self {
+            Seed::Fixed(value) => value,
+            Seed::Auto => {
+                let stem = input.file_stem().unwrap_or_default();
+                fnv1a(stem.as_encoded_bytes())
+            }
+        }
+    }
+}
+
+/// FNV-1a, 64-bit.
+///
+/// Hand-rolled rather than taken from `std`: `DefaultHasher` promises nothing
+/// across Rust releases, and a seed that changes when the toolchain does would
+/// make "same inputs, same video" (`AGENTS.md`, determinism) a lie that only
+/// shows up on someone else's machine.
+fn fnv1a(bytes: &[u8]) -> u64 {
+    const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+    const PRIME: u64 = 0x0000_0100_0000_01b3;
+
+    bytes.iter().fold(OFFSET_BASIS, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(PRIME)
+    })
+}
+
+impl fmt::Display for Seed {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Seed::Auto => f.write_str("auto"),
+            Seed::Fixed(value) => write!(f, "{value}"),
+        }
+    }
+}
+
 impl FromStr for Seed {
     type Err = ParseError;
 

@@ -233,6 +233,27 @@ specific to this RFC:
   so seeding cannot become a source of the float drift golden frames exist to
   catch. Adjacent seeds avalanche, so `--seed 1` and `--seed 2` are unrelated
   videos rather than nearly the same one.
+- **`seed = "auto"` is FNV-1a of the file *stem*, hand-rolled** (decided in Step
+  22). VISION §5.3 wants a default seed "derived from the file name so re-renders
+  match", which rules out the path: the same album on a laptop and on a homelab
+  host must render the same video. It also rules out `DefaultHasher`, which
+  promises nothing across Rust releases — a seed that moves with the toolchain
+  would break "same inputs, same video" only on someone else's machine, months
+  later. FNV-1a over the stem's bytes is ten lines, needs no dependency, and is
+  pinned by `the_auto_seed_hash_is_pinned_across_toolchains`.
+- **The template is generated from `Config::default()`, not written out**
+  (decided in Step 22). `config::example` builds each `key = value` from the
+  resolved default, and `every_declared_key_is_documented` reads the field list
+  out of serde's own `unknown field` message rather than from a list a human
+  maintains — so a key added to `ConfigLayer` and forgotten in the template fails
+  the build. `example_parses_under_strict_validation_into_the_built_in_defaults`
+  closes the loop: what avz prints, avz accepts, and it changes nothing.
+- **A deferred codec is exit 2, not exit 4** (decided in Step 22). `--codec av1`
+  is a thing the user typed and it fails every song in a batch identically, which
+  is what VISION §8 spends exit 2 on; exit 4 would tell a retry loop the encoder
+  had a bad day. `background.video`, the other NG-deferral reachable from a
+  config file, already lands there. `pipeline::render` asks `encode::video_encoder`
+  before the song is decoded, so the refusal costs a millisecond, not a render.
 - **Golden frames hash the RGBA bytes, and their features are hand-written**
   (decided in Step 14). `crates/avz-core/tests/golden_frames.rs` renders three
   frames per preset at 320×180 on lavapipe and compares a sha256 against
@@ -399,7 +420,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 - [x] **Step 21** - Progress bars, actionable warnings, error-message and exit-code
   audit *(prerequisite: Step 9)*
-- [ ] **Step 22** - `avz config --example`, `--seed`/default seed, `--quality`
+- [x] **Step 22** - `avz config --example`, `--seed`/default seed, `--quality`
   *(prerequisite: Steps 15, 16)*
 - [ ] **Step 23** - Release v0.1: README usage docs, `cargo install` from clean
   checkout, album batch acceptance run, tag *(prerequisite: all)*
