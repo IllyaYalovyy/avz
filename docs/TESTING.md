@@ -60,6 +60,33 @@ asserts not only that the quiet clicks are found but that a *global* threshold
 computed over the same song would have missed them — otherwise the test would
 pass against a fixed threshold and prove nothing.
 
+**Normalization erases the units the DSP tests assert on.** `analyze` rescales
+each feature against that feature's own p5..p95 over the whole song, which is
+exactly the information "a 60 Hz sine's bass energy towers over its mid" is a
+statement about — and it rescales each feature *independently*, so after the pass
+"bass towers over mid" is not a comparison the timeline can even express. The
+windowed-FFT half therefore stays reachable as `features::raw_timeline`, and every
+test whose expected value is known analytically asserts on that. `analyze` itself
+is `raw_timeline` plus a pure function of a whole track, and that function is
+tested as one in `analysis/envelope.rs` against a step, a ramp, and a
+hand-computed hundred-value vector. What remains on `analyze` are the properties
+only the composed pass has: everything in `0.0..=1.0`
+(`every_feature_of_the_fixture_lands_in_the_unit_interval`), no `NaN` on silence,
+the onset impulse untouched, and two masters twenty decibels apart producing the
+same timeline.
+
+**The envelope is pinned in time, not in frames.** `env = x + (env - x)·exp(-1/(τ·fps))`
+means a hit swells and fades over the same milliseconds at 24, 30, and 60 fps, and
+`step_input_env_reaches_90pct_within_attack_budget` and
+`release_tail_matches_decay_time_constant` assert exactly that, at each of them,
+against the closed form `exp(-t/τ)` rather than against recorded output. The
+follower needs no output clamp because every step is a convex combination of its
+input and its own last value, so it cannot leave the input's range — a property
+rather than an arithmetic fact, and therefore checked as one over pseudo-random
+tracks in `env_never_exceeds_input_peak_or_drops_below_zero`. The attack and decay
+defaults (10 ms / 300 ms) are the M2 manual-tuning surface; the tests pin the
+*math*, and the reference-track listening pass is what moves the numbers.
+
 The VISION §5.1 performance budget — low single-digit seconds for a five-minute
 song, which is what the reused FFT planner and the parallel windows buy — is a
 smoke test in `crates/avz-core/tests/analysis_perf.rs`. It sits there rather than
@@ -168,8 +195,13 @@ exists, or `TODO` / `manual` with a reason.
 | One physical hit fires two onsets, one per analysis window that overlaps it | Every kick double-flashes | Unit | `refractory_period_merges_double_triggers`, `two_clicks_inside_the_refractory_period_are_one_onset`, `hits_a_refractory_period_apart_are_both_kept` |
 | The onset impulse's decay is a per-frame factor rather than a time constant | A hit fades over twice as long at 60 fps as at 30 | Unit | `onset_impulse_decays_exponentially` (asserted in time, at both fps), `the_onset_impulse_decays_from_each_hit`, `every_hit_restarts_the_impulse_at_one` |
 | The threshold window is zero-padded at the song's edges | The opening chord reads as an onset; the last second stops detecting | Unit | `the_threshold_window_clamps_at_the_song_edges`, `first_and_last_second_do_not_panic` |
-| Envelope follower attack/decay math wrong | Motion is twitchy or sluggish | Unit | TODO |
-| Normalization divides by zero on silence | Panic or NaN frames | Unit | TODO |
+| Envelope follower attack/decay math wrong | Motion is twitchy or sluggish | Unit + manual | `step_input_env_reaches_90pct_within_attack_budget`, `release_tail_matches_decay_time_constant`, `the_envelope_rises_faster_than_it_falls`, `the_envelope_holds_a_feature_after_it_has_fallen_away`; manual listening pass |
+| The envelope's attack or decay is a per-frame factor rather than a time constant | A hit swells and fades over twice as long at 60 fps as at 30 | Unit | `step_input_env_reaches_90pct_within_attack_budget`, `release_tail_matches_decay_time_constant` (both asserted in time, across three frame rates) |
+| The envelope overshoots the feature it follows | A normalized feature drives a uniform past 1.0 and the shader clips | Property | `env_never_exceeds_input_peak_or_drops_below_zero` |
+| `visual.smoothing` reaches nothing | The one global tuning knob VISION §5.5 promises silently does nothing | Unit | `smoothing_config_scales_decay`, `a_larger_smoothing_holds_every_envelope_longer`, `the_default_smoothing_yields_the_default_decay` |
+| Normalization divides by zero on silence | Panic or NaN frames | Unit | `silence_normalizes_without_nan`, `constant_signal_normalizes_to_zeros_not_nan`, `silence_has_no_nans_in_any_feature`, `every_feature_of_the_fixture_lands_in_the_unit_interval` |
+| Normalization is computed per `--sample` excerpt rather than per song | The same second looks different in the preview and in the full render | Unit | `a_quiet_master_and_a_loud_one_analyze_to_the_same_timeline`; analysis never sees the sample range, and `pipeline::render` normalizes before `frame_range` |
+| The global pass rescales the onset impulse | A hit stops reading exactly 1.0 and `is_onset` finds nothing | Unit | `the_onset_impulse_passes_through_the_global_normalization_unchanged` |
 | Analysis frames do not land on video frame timestamps | Cumulative audio/visual drift over a long song | Unit | `analysis_frames_never_drift_from_the_video_frame_clock`, `a_burst_lands_on_the_video_frame_nearest_it`, `one_feature_frame_per_video_frame`, `a_partial_final_video_frame_still_gets_a_feature_frame` |
 | Analysis windows leave gaps between hops at low fps | A hit landing in a gap never reaches the visuals | Unit | `no_audio_falls_between_windows_when_the_hop_exceeds_the_window` |
 | RMS is wrong in a way that still looks plausible | Brightness follows nothing in particular | Unit | `a_constant_sine_has_the_same_rms_on_every_frame`, `a_dc_signal_has_an_rms_equal_to_its_amplitude`, `a_loud_passage_reads_louder_than_a_quiet_one`, `silence_has_zero_rms_and_no_nans` |

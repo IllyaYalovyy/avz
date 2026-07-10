@@ -9,15 +9,18 @@
 //!
 //! The DSP is split so each half can be tested against signals whose correct
 //! answer is known analytically: [`spectrum`] reads features off one magnitude
-//! spectrum, [`onset`] reads hits off a whole flux track, and [`features`] owns
-//! window placement and the parallel drive loop that joins them.
+//! spectrum, [`onset`] reads hits off a whole flux track, [`envelope`] rescales
+//! and smooths a whole feature track, and [`features`] owns window placement and
+//! the parallel drive loop that joins them.
 
 pub mod decode;
+pub mod envelope;
 pub mod features;
 pub mod onset;
 pub mod spectrum;
 
 pub use decode::{DecodedAudio, decode};
-pub use features::{FeatureFrame, FeatureTimeline, analyze};
+pub use envelope::EnvelopeParams;
+pub use features::{FeatureFrame, FeatureTimeline, analyze, analyze_with};
 pub use onset::{OnsetParams, Onsets};
 pub use spectrum::{BAND_COUNT, BAND_EDGES};
