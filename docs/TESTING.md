@@ -277,6 +277,46 @@ function of frame `N`'s inputs — which is what lets `--sample 1:00..1:03` rend
 the same seconds a full render would, and what keeps a golden hash from becoming a
 hash of the driver's rounding on the frames before it.
 
+**A preset on no binding at all.** `kaleido` asks the renderer for nothing beyond
+the uniform, so there is no plumbing half to test and the whole risk lives in the
+shader. Four tests carry it, and each covers a way the preset could pass its
+golden hashes while being wrong.
+
+`kaleido_folds_the_frame_into_the_wedges_it_declares` is the preset itself as an
+assertion. A shader that drew the same petals and rings *without folding them*
+would be blessed by every hash, would react to every feature, and would leave the
+backdrop showing through — nothing else here would say a word. So the frame is
+compared against itself turned by one wedge, which a fold into `segments` wedges
+is symmetric under by construction, and then against itself turned by half a
+wedge, which it must not be: otherwise the first assertion would pass on
+concentric rings with no angular structure at all. The profile is read around a
+circle with bilinear sampling, because a rotation lands between pixel centers and
+nearest-pixel quantization would sit an order of magnitude above the symmetry
+being measured.
+
+`a_mirrored_fold_reflects_the_frame_across_its_axis` pins the `mirror` parameter,
+which `param_reaches_declared_uniform_slot` cannot: a bool that changed *a* pixel
+through any use at all would satisfy that test. With `spin = 0` the fold's axis is
+the frame's own horizontal, and a 180-row frame puts its center on a row boundary,
+so rows `j` and `179 - j` sample points exactly `±d` from it. Mirrored, the frame
+must be its own reflection; rotated, it must not be.
+
+`the_only_clocks_kaleido_reads_are_the_three_knobs_that_name_one` is `AGENTS.md`
+determinism stated somewhere it can be checked. `time` reaches the picture through
+`spin`, `drift`, and `hue_cycle` and nowhere else, so with all three at zero the
+same features must render the same frame three seconds apart. A stray `sin(time)`
+wobble is invisible to a golden hash, which pins one frame, and invisible to
+`param_reaches_declared_uniform_slot`, which never moves `time`. It is also what
+forces the grain to be sampled in the *folded* coordinates rather than at the
+fragment's own position — per-pixel grain would break the symmetry the preset
+exists for, and `a_mirrored_fold_reflects_the_frame_across_its_axis` is what
+would notice.
+
+`the_hue_cycles_with_time_under_features_that_do_not_move` is the other half of
+that: turn the other two clocks off and the frame must still change, or the hue
+was wired to `centroid` alone and the preset is a still picture under a held
+chord.
+
 The Rust side of that boundary is
 `globals_layout_matches_wgsl`, which pins every member's byte offset — the
 uniform is encoded by hand, field by field, since `avz-core` is
@@ -505,6 +545,8 @@ exists, or `TODO` / `manual` with a reason.
 | A burst is hashed from its sliding slot rather than from the hit that threw it | Every live particle tears across the frame on every kick; both frames still hash, so no golden test disagrees | Integration (pixels) | `a_burst_is_hashed_from_the_hit_that_threw_it_and_not_from_its_slot` |
 | `particles`' burst cull is narrower than a particle's glow | The cull stops being an optimization and becomes the shape: bursts get a hard edge and a hollow middle, and the golden hashes bless it | Integration (pixels) | `the_burst_cull_takes_no_light_off_the_burst_it_skips`, `a_burst_lights_a_disc_on_the_frame_it_is_thrown` |
 | A preset carries state between draws | Frame `N` depends on the driver's rounding on frames `0..N`; `--sample` renders different pixels than a full render | Integration (pixels) | `particles_renders_a_frame_the_same_whether_or_not_the_frames_before_it_were_drawn` |
+| `kaleido` stops folding, or folds into a different number of wedges than its schema declares | The golden hashes bless a preset that draws petals and rings with no symmetry in them, and `segments` is decoration | Integration (pixels) | `kaleido_folds_the_frame_into_the_wedges_it_declares`, `a_mirrored_fold_reflects_the_frame_across_its_axis` |
+| A shader reads the clock somewhere other than the knobs that name one | A golden hash pins one frame and cannot see it; the render still looks right and stops being reproducible from its config | Integration (pixels) | `the_only_clocks_kaleido_reads_are_the_three_knobs_that_name_one`, `the_hue_cycles_with_time_under_features_that_do_not_move` |
 | The spectrogram's global normalization divides by a silent song's zero spread | A `NaN` reaches the texture and every ribbon paints black | Unit | `a_silent_song_has_a_zero_spectrum_and_no_nans`, `the_spectrum_is_normalized_into_the_unit_interval` |
 | `--seed` never reaches the shader's noise | Two seeds render the same video; `--seed` is decoration | Integration (pixels) | `different_seed_different_hash` |
 | A golden test renders on a hardware adapter | The committed hashes are a hash of one laptop; the test fails everywhere else for reasons that look like shader bugs | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |

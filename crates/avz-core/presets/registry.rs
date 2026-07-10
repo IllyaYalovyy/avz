@@ -40,4 +40,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("particles.wgsl"),
         schema: include_str!("particles.json"),
     },
+    Preset {
+        name: "kaleido",
+        description: "symmetric and hypnotic: a mirrored fold that turns while the hue walks the palette",
+        source: include_str!("kaleido.wgsl"),
+        schema: include_str!("kaleido.json"),
+    },
 ];

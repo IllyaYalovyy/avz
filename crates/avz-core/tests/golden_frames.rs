@@ -1476,6 +1476,307 @@ fn particles_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
     );
 }
 
+/// A loud, mid-heavy passage with nothing transient in it: enough light in every
+/// band `kaleido` reads that its fold is on screen, and no onset flare washing
+/// the geometry out.
+fn kaleido_features() -> FeatureFrame {
+    FeatureFrame {
+        rms_env: 0.90,
+        bass_env: 0.40,
+        low_mid_env: 0.50,
+        mid_env: 0.60,
+        high_env: 0.50,
+        air_env: 0.30,
+        flux: 0.10,
+        centroid: 0.40,
+        ..FeatureFrame::default()
+    }
+}
+
+/// One frame of `kaleido` over no backdrop, drawn at `frame_index` from
+/// `features`, with some of its parameters moved off their defaults.
+///
+/// No backdrop: what comes back is the preset's own premultiplied light, so a
+/// test may read "unlit" off a pixel rather than off the palette gradient the
+/// compositor would have put under it.
+fn kaleido_light(
+    frame_index: usize,
+    features: FeatureFrame,
+    overrides: &[(&str, toml::Value)],
+) -> Vec<u8> {
+    let kaleido = Preset::by_name("kaleido").expect("kaleido ships");
+
+    let mut table = toml::Table::new();
+    for (name, value) in overrides {
+        table.insert((*name).to_owned(), value.clone());
+    }
+    let params = kaleido
+        .schema()
+        .expect("the shipped schema parses")
+        .resolve(&table)
+        .expect("the overrides are in range");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let stage = Stage::new(&gpu, kaleido, ember(), None);
+    let globals = Globals::for_frame(
+        frame_index,
+        FPS,
+        (WIDTH, HEIGHT),
+        GOLDEN_SEED,
+        features,
+        ember(),
+        params,
+    );
+    stage.draw(&gpu, &globals, &silent_spectrum(), &silent_onsets());
+
+    stage.read(&gpu)
+}
+
+/// `kaleido` is the preset RFC-001 NG1 said would need no new binding: a fold
+/// over the frame it draws itself, and nothing else. Its whole diff is three
+/// files in `presets/`, which is G3 (`scripts/quality.d/96-*`) holding for a
+/// fifth time — but only for as long as its schema asks for nothing.
+///
+/// A `needs_feedback` that crept in here would cost a full-resolution texture
+/// and a per-frame copy on every render, and no other test would say so.
+#[test]
+fn kaleido_folds_the_uniform_alone_and_asks_the_renderer_for_no_texture() {
+    let kaleido = Preset::by_name("kaleido").expect("kaleido ships");
+    let schema = kaleido.schema().expect("the shipped schema parses");
+
+    assert!(!schema.needs_feedback, "kaleido reads no previous frame");
+    assert!(!schema.needs_spectrum, "kaleido reads no spectrum");
+    assert!(!schema.needs_onsets, "kaleido reads no onset history");
+}
+
+/// The luminance of `frame` around a circle of `radius` from its center, at
+/// `samples` angles, counter-clockwise from the positive x-axis.
+///
+/// Bilinear rather than nearest-pixel: the frames below are compared against
+/// *rotations* of themselves, and a rotation lands between pixel centers. Reading
+/// the nearest one would leave a quantization floor an order of magnitude above
+/// the symmetry being measured. `radius` is in the shader's own units, where the
+/// short edge is 1.0.
+fn ring_profile(frame: &[u8], radius: f32, samples: usize) -> Vec<f32> {
+    let (width, height) = (WIDTH as f32, HEIGHT as f32);
+    let short = width.min(height);
+
+    let light = |x: usize, y: usize| -> f32 {
+        let pixel = &frame[4 * (y * WIDTH as usize + x)..];
+        f32::from(pixel[0]) + f32::from(pixel[1]) + f32::from(pixel[2])
+    };
+
+    (0..samples)
+        .map(|sample| {
+            let angle = std::f32::consts::TAU * sample as f32 / samples as f32;
+            // The shader's `p.y` runs up and the frame's rows run down.
+            let x = 0.5 * width + radius * short * angle.cos() - 0.5;
+            let y = 0.5 * height - radius * short * angle.sin() - 0.5;
+
+            let (x0, y0) = (x.floor(), y.floor());
+            let (fx, fy) = (x - x0, y - y0);
+            let (x0, y0) = (x0 as usize, y0 as usize);
+
+            let top = light(x0, y0) * (1.0 - fx) + light(x0 + 1, y0) * fx;
+            let bottom = light(x0, y0 + 1) * (1.0 - fx) + light(x0 + 1, y0 + 1) * fx;
+            top * (1.0 - fy) + bottom * fy
+        })
+        .collect()
+}
+
+/// How far `profile` is from itself turned by `shift` samples.
+fn turned_by(profile: &[f32], shift: usize) -> f32 {
+    let sum: f32 = (0..profile.len())
+        .map(|i| (profile[i] - profile[(i + shift) % profile.len()]).abs())
+        .sum();
+    sum / profile.len() as f32
+}
+
+/// `kaleido` folds the frame into the number of wedges its schema declares.
+///
+/// The whole preset is that fold, and nothing else in this file would notice its
+/// absence: a shader that drew the same petals and rings without folding them
+/// would have its golden hashes blessed, would react to every feature, and would
+/// leave the backdrop showing through. So the frame is compared against *itself,
+/// turned by one wedge* — the symmetry a fold into `segments` wedges has by
+/// construction, whatever else the shader draws.
+///
+/// Turned by half a wedge it must not match, or the assertion above would pass on
+/// a shader that drew concentric rings and no angular structure at all.
+#[test]
+fn kaleido_folds_the_frame_into_the_wedges_it_declares() {
+    /// A ring well inside the vignette, out where the petals have room.
+    const RADIUS: f32 = 0.35;
+    /// Divisible by both `SEGMENTS` and twice `SEGMENTS`, so a wedge and half a
+    /// wedge are both whole numbers of samples.
+    const SAMPLES: usize = 360;
+    const SEGMENTS: i64 = 6;
+
+    let frame = kaleido_light(
+        100,
+        kaleido_features(),
+        &[("segments", toml::Value::Integer(SEGMENTS))],
+    );
+    let profile = ring_profile(&frame, RADIUS, SAMPLES);
+
+    let wedge = SAMPLES / SEGMENTS as usize;
+    let at_wedge = turned_by(&profile, wedge);
+    let at_half_wedge = turned_by(&profile, wedge / 2);
+
+    assert!(
+        at_half_wedge > 1.0,
+        "the frame is the same half a wedge round as it is here (by {at_half_wedge:.3} \
+         of 765): kaleido drew no angular structure to fold",
+    );
+    assert!(
+        at_wedge * 4.0 < at_half_wedge,
+        "turned by one wedge the frame differs by {at_wedge:.3} and turned by half a \
+         wedge by {at_half_wedge:.3}: kaleido is not folding its frame into \
+         {SEGMENTS} wedges",
+    );
+}
+
+/// Where `frame` differs from itself reflected top to bottom, by more than the
+/// last bit of an 8-bit channel.
+///
+/// The reflection is exact in the shader's coordinates: a 180-row frame puts its
+/// center on a row boundary, so the pixel centers of rows `j` and `179 - j` sit
+/// at `+d` and `-d` from it. Only the fold decides whether the light there does.
+fn rows_not_mirrored(frame: &[u8]) -> usize {
+    let (width, height) = (WIDTH as usize, HEIGHT as usize);
+
+    (0..height / 2)
+        .flat_map(|row| (0..width).map(move |column| (row, column)))
+        .filter(|&(row, column)| {
+            let top = &frame[4 * (row * width + column)..][..3];
+            let bottom = &frame[4 * ((height - 1 - row) * width + column)..][..3];
+            top.iter().zip(bottom).any(|(a, b)| a.abs_diff(*b) > 1)
+        })
+        .count()
+}
+
+/// `mirror` is what makes a kaleidoscope a kaleidoscope: alternate wedges are
+/// reflections of their neighbours rather than copies, so the fold has an axis
+/// and the frame is symmetric across it.
+///
+/// With `spin = 0` that axis is the frame's own horizontal, and the picture must
+/// be its own reflection. Turned off, the wedges are rotated copies and the
+/// reflection is gone. A `params[3].x` the shader packed but never branched on
+/// would render one picture for both, and `param_reaches_declared_uniform_slot`
+/// would still pass — a bool changes *a* pixel through any use at all.
+#[test]
+fn a_mirrored_fold_reflects_the_frame_across_its_axis() {
+    let still = [("spin", toml::Value::Float(0.0))];
+
+    let mirrored = kaleido_light(
+        100,
+        kaleido_features(),
+        &[still[0].clone(), ("mirror", toml::Value::Boolean(true))],
+    );
+    let rotated = kaleido_light(
+        100,
+        kaleido_features(),
+        &[still[0].clone(), ("mirror", toml::Value::Boolean(false))],
+    );
+
+    assert_eq!(
+        rows_not_mirrored(&mirrored),
+        0,
+        "a mirrored fold with no spin on it is not symmetric about the frame's \
+         horizontal: its wedges are not reflections of one another",
+    );
+
+    let asymmetric = rows_not_mirrored(&rotated);
+    assert!(
+        asymmetric > 1_000,
+        "with `mirror` off only {asymmetric} pixels break the reflection: the fold \
+         mirrors its wedges whatever the parameter says",
+    );
+}
+
+/// The only clocks in `kaleido` are the three knobs that name one: the fold's
+/// `spin`, the rings' `drift`, and the palette's `hue_cycle`.
+///
+/// Turn all three off and the frame is a function of its features alone, so the
+/// same features render the same picture three seconds apart. This is `AGENTS.md`
+/// determinism stated where it can actually be checked: a `sin(time)` wobble
+/// somewhere in the shader is invisible in a golden hash — which pins one frame —
+/// and invisible in `param_reaches_declared_uniform_slot`, which never moves
+/// `time`.
+#[test]
+fn the_only_clocks_kaleido_reads_are_the_three_knobs_that_name_one() {
+    let stopped = [
+        ("spin", toml::Value::Float(0.0)),
+        ("drift", toml::Value::Float(0.0)),
+        ("hue_cycle", toml::Value::Float(0.0)),
+    ];
+
+    let early = kaleido_light(10, kaleido_features(), &stopped);
+    let late = kaleido_light(100, kaleido_features(), &stopped);
+
+    assert_eq!(
+        hex(&early),
+        hex(&late),
+        "with its spin, its drift, and its hue cycle all at zero, kaleido renders \
+         frame 10 and frame 100 differently: something else in the shader reads \
+         the clock",
+    );
+}
+
+/// The hue cycles (`VISION.md` §6): the palette walks on under a passage whose
+/// features never move, which is the half of "hypnotic" that is not the fold.
+///
+/// Everything else that reads `time` is turned off, so what changes between the
+/// two frames is the hue and nothing else. Without this, `hue_cycle` could be
+/// wired to `centroid` alone and still pass every other test here.
+#[test]
+fn the_hue_cycles_with_time_under_features_that_do_not_move() {
+    let cycling = [
+        ("spin", toml::Value::Float(0.0)),
+        ("drift", toml::Value::Float(0.0)),
+        ("hue_cycle", toml::Value::Float(0.5)),
+    ];
+
+    let early = kaleido_light(10, kaleido_features(), &cycling);
+    let late = kaleido_light(100, kaleido_features(), &cycling);
+
+    assert_ne!(
+        hex(&early),
+        hex(&late),
+        "three seconds apart, under identical features, kaleido renders the same \
+         colors: the hue does not cycle with time",
+    );
+}
+
+/// `--sample 3s --adapter software` must produce stable, non-black, evolving
+/// output, as for every preset before it: that the frame is *lit* without blowing
+/// out. A fold fills the frame, so the bar for "lit" is the half of it the
+/// vignette leaves alone.
+#[test]
+fn kaleido_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
+    let frame = kaleido_light(100, kaleido_features(), &[]);
+
+    let lit = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] != [0, 0, 0])
+        .count();
+    let white = frame
+        .chunks_exact(4)
+        .filter(|pixel| pixel[..3] == [255, 255, 255])
+        .count();
+    let total = (WIDTH * HEIGHT) as usize;
+
+    assert!(
+        lit * 2 > total,
+        "only {lit} of {total} pixels are lit: kaleido renders black",
+    );
+    assert!(
+        white * 4 < total,
+        "{white} of {total} pixels are pure white: the fold blew out",
+    );
+}
+
 /// The two moments of the card's envelope that are worth pinning: halfway up the
 /// fade, and fully up during the hold.
 ///
@@ -1946,6 +2247,83 @@ fn dump_particles_tuning_frames() {
             params,
         );
         visualizer.draw(&gpu, &visual, &globals, &silent_spectrum(), &history(index));
+
+        compositor.composite(&gpu, &target);
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+        let path = out.join(format!("{index:03}.png"));
+        image::RgbaImage::from_raw(WIDE, TALL, pixels)
+            .expect("the frame is WIDE x TALL RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+}
+
+/// The same instrument for `kaleido`, in `target/kaleido-tuning/`.
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_kaleido
+/// ```
+///
+/// A hash says the fold did not change; it does not say the fold is hypnotic.
+/// What is being looked at is whether the symmetry reads as glass rather than as
+/// a wallpaper tile — whether the spin is slow enough to follow and the hue walks
+/// the palette without banding at the wrap. So the frames are seconds apart, over
+/// a swell with a hit in it.
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual tuning pass; asserts nothing"]
+fn dump_kaleido_tuning_frames() {
+    const WIDE: u32 = 960;
+    const TALL: u32 = 540;
+    const KEPT: [usize; 6] = [0, 15, 30, 90, 150, 240];
+
+    let preset = Preset::by_name("kaleido").expect("kaleido ships");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/kaleido-tuning");
+    fs::create_dir_all(&out).expect("create target/kaleido-tuning");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
+    let background = Backdrop::default().layer(&gpu, WIDE, TALL, ember());
+    let visual = Layer::new(&gpu, WIDE, TALL, "visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual).expect("kaleido compiles");
+    let compositor = Compositor::new(&gpu, &[&background, &visual]).expect("two 960x540 layers");
+
+    let params = defaults(preset);
+    for index in KEPT {
+        let seconds = index as f32 / FPS as f32;
+        // A swell that breathes once every eight seconds, a hit on the beat.
+        let swell = 0.5 + 0.5 * (seconds * 0.8).sin();
+        let features = FeatureFrame {
+            rms_env: 0.45 + 0.45 * swell,
+            bass_env: swell,
+            low_mid_env: 0.3 + 0.4 * swell,
+            mid_env: 0.7 - 0.3 * swell,
+            high_env: 0.5 * swell,
+            air_env: 0.3,
+            flux: 0.15,
+            onset: f32::from(index % FPS as usize == 0),
+            centroid: 0.25 + 0.4 * swell,
+            ..FeatureFrame::default()
+        };
+
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDE, TALL),
+            GOLDEN_SEED,
+            features,
+            ember(),
+            params,
+        );
+        visualizer.draw(
+            &gpu,
+            &visual,
+            &globals,
+            &silent_spectrum(),
+            &silent_onsets(),
+        );
 
         compositor.composite(&gpu, &target);
         let pixels = target.read_rgba(&gpu).expect("the frame reads back");
