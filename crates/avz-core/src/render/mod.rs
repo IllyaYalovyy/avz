@@ -14,6 +14,7 @@
 pub mod adapter;
 pub mod globals;
 pub mod offscreen;
+pub mod palette;
 pub mod preset;
 pub mod readback;
 pub mod schema;
@@ -21,6 +22,7 @@ pub mod schema;
 pub use adapter::{AdapterChoice, AdapterKind};
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
 pub use offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+pub use palette::{BUILT_INS, BuiltIn, LinearPalette};
 pub use preset::{PRESETS, Preset, Visualizer};
 pub use readback::RowLayout;
 pub use schema::{PackedParams, Param, ParamKind, PresetSchema, SLOT_COMPONENTS, Slot};

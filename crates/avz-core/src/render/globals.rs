@@ -33,11 +33,15 @@
 //! which is what WGSL's uniform address space demands of an array member.
 
 use crate::analysis::FeatureFrame;
-use crate::config::{Color, MAX_PALETTE_COLORS};
+use crate::render::palette::LinearPalette;
 use crate::render::schema::PackedParams;
 
 /// Palette slots the uniform carries (`VISION.md` §6: `pal: array<vec4, 5>`).
-pub const PALETTE_SLOTS: usize = MAX_PALETTE_COLORS;
+///
+/// Fixed by the WGSL, not by what a user may write: an inline `visual.palette`
+/// of any legal length is resampled onto exactly these five slots by
+/// [`palette::resolve`](crate::render::palette::resolve).
+pub const PALETTE_SLOTS: usize = 5;
 
 /// Preset parameter slots (`VISION.md` §6: `params: array<vec4, 8>`).
 pub const PARAM_SLOTS: usize = 8;
@@ -64,8 +68,9 @@ pub struct Globals {
     /// Five palette colors in **linear** space, RGBA.
     ///
     /// Linear because the render target is `Rgba8UnormSrgb` and encodes on
-    /// write, so a shader that blends must blend in linear space.
-    pub palette: [[f32; 4]; PALETTE_SLOTS],
+    /// write, so a shader that blends must blend in linear space. Produced by
+    /// [`palette::resolve`](crate::render::palette::resolve).
+    pub palette: LinearPalette,
     /// The active preset's parameters, packed by
     /// [`PresetSchema::resolve`](crate::render::PresetSchema::resolve).
     pub params: PackedParams,
@@ -83,7 +88,7 @@ impl Globals {
         resolution: (u32, u32),
         seed: u64,
         features: FeatureFrame,
-        palette: [Color; PALETTE_SLOTS],
+        palette: LinearPalette,
         params: PackedParams,
     ) -> Self {
         // The f64 divide is `FeatureTimeline::timestamp`'s, so the shader's clock
@@ -95,7 +100,7 @@ impl Globals {
             resolution: [resolution.0 as f32, resolution.1 as f32],
             seed: seed_fraction(seed),
             features,
-            palette: palette.map(linear_rgba),
+            palette,
             params,
         }
     }
@@ -194,39 +199,18 @@ pub fn seed_fraction(seed: u64) -> f32 {
     f32::from_bits(0x3f80_0000 | (z >> 41) as u32) - 1.0
 }
 
-/// An sRGB config color as linear-space RGBA, which is what shaders blend in.
-///
-/// Shared with [`schema`](crate::render::schema), so a `color` preset parameter
-/// reaches the shader in the same space the palette does.
-pub(crate) fn linear_rgba(color: Color) -> [f32; 4] {
-    [
-        srgb_to_linear(color.r),
-        srgb_to_linear(color.g),
-        srgb_to_linear(color.b),
-        f32::from(color.a) / 255.0,
-    ]
-}
-
-/// The sRGB electro-optical transfer function, inverted.
-fn srgb_to_linear(channel: u8) -> f32 {
-    let encoded = f32::from(channel) / 255.0;
-    if encoded <= 0.040_45 {
-        encoded / 12.92
-    } else {
-        ((encoded + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Palette;
+    use crate::render::palette;
 
     fn features() -> FeatureFrame {
         FeatureFrame::default()
     }
 
-    fn white() -> [Color; PALETTE_SLOTS] {
-        ["#ffffff".parse().expect("a color"); PALETTE_SLOTS]
+    fn ember() -> LinearPalette {
+        palette::resolve(&Palette::Named("ember".to_owned())).expect("`ember` ships")
     }
 
     /// A preset with every parameter at zero: the uniform layout is what these
@@ -342,7 +326,7 @@ mod tests {
     fn time_is_the_frame_index_over_the_frame_rate() {
         for (index, fps, expected) in [(0, 30, 0.0), (30, 30, 1.0), (45, 30, 1.5), (60, 24, 2.5)] {
             let globals =
-                Globals::for_frame(index, fps, (320, 180), 0, features(), white(), no_params());
+                Globals::for_frame(index, fps, (320, 180), 0, features(), ember(), no_params());
             assert_eq!(globals.time, expected, "frame {index} at {fps} fps");
         }
     }
@@ -362,27 +346,21 @@ mod tests {
         assert_eq!(seed_fraction(42), seed_fraction(42), "and it is a function");
     }
 
-    /// The palette reaches the shader in linear space, because the render target
-    /// encodes to sRGB on write.
+    /// The resolved palette reaches the uniform untouched. `palette::resolve` is
+    /// the one place sRGB becomes linear light; `for_frame` must not convert it
+    /// a second time, which would wash every palette out by a stop and a half.
     #[test]
-    fn the_palette_reaches_the_shader_in_linear_space() {
-        let colors: [Color; PALETTE_SLOTS] = [
+    fn the_resolved_palette_reaches_the_shader_unaltered() {
+        let colors = palette::resolve(&Palette::Inline(vec![
             "#000000".parse().expect("a color"),
             "#ffffff".parse().expect("a color"),
-            "#808080".parse().expect("a color"),
-            "#ffffff".parse().expect("a color"),
-            "#ffffff".parse().expect("a color"),
-        ];
+        ]))
+        .expect("two colors resolve");
+
         let globals = Globals::for_frame(0, 30, (320, 180), 0, features(), colors, no_params());
 
+        assert_eq!(globals.palette, colors);
         assert_eq!(globals.palette[0], [0.0, 0.0, 0.0, 1.0]);
-        assert_eq!(globals.palette[1], [1.0, 1.0, 1.0, 1.0]);
-        // Mid-grey is ~0.216 in linear, not 0.5. Getting this wrong washes every
-        // palette out by a stop and a half.
-        assert!(
-            (globals.palette[2][0] - 0.2158).abs() < 0.001,
-            "sRGB 0x80 is {} in linear, expected ~0.216",
-            globals.palette[2][0],
-        );
+        assert_eq!(globals.palette[4], [1.0, 1.0, 1.0, 1.0]);
     }
 }

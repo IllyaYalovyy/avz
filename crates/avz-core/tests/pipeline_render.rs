@@ -23,7 +23,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use avz_core::analysis::{self, FeatureTimeline};
-use avz_core::config::{Config, SampleRange};
+use avz_core::config::{Config, Palette, SampleRange};
 use avz_core::encode::{DEFAULT_PROGRAM, Ffmpeg, preflight};
 use avz_core::pipeline::{RenderRequest, RenderSummary, render};
 use avz_core::render::{AdapterChoice, AdapterKind};
@@ -549,6 +549,39 @@ fn an_unknown_preset_fails_before_the_song_is_even_decoded() {
     assert!(matches!(err, Error::Config(_)), "got {err:?}");
     assert!(
         err.to_string().contains("pulse"),
+        "name what does exist: {err}"
+    );
+    assert!(!output.exists() && !part.exists(), "nothing was written");
+}
+
+/// A typo'd `visual.palette` costs a millisecond, not a decode — the same
+/// promise `visual.preset` makes, and for the same reason.
+#[test]
+fn an_unknown_palette_fails_before_the_song_is_even_decoded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.visual.palette = Palette::Named("embers".to_owned());
+
+    let _device = one_device_at_a_time();
+    let err = render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: None,
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect_err("there is no palette called `embers`");
+
+    assert!(matches!(err, Error::Config(_)), "got {err:?}");
+    assert!(
+        err.to_string().contains("carpathian"),
         "name what does exist: {err}"
     );
     assert!(!output.exists() && !part.exists(), "nothing was written");

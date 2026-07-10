@@ -21,10 +21,18 @@ request that does not serve it goes to the backlog.
 pipeline — decode, full FFT analysis with envelopes and onsets, the `pulse`
 preset on the GPU, ffmpeg encode with the original audio muxed untouched — and
 `avz probe` reports tags. `avz presets` lists what ships and prints a preset's
-parameter schema; `--config` and `--set` configure it. Palettes, text, and
-background layers arrive in the rest of M3 and M4, so `--preset`, `--palette`,
-and `--bg` below are not flags yet, and `avz config` still exits with
-"not implemented yet".
+parameter schema; `--config`, `--set`, and `--palette` configure it. Text and
+background layers arrive in M4, so `--preset` and `--bg` below are not flags
+yet, and `avz config` still exits with "not implemented yet".
+
+**Palettes.** `--palette` takes a built-in name — `ember`, `glacier`, `verdant`,
+`mono`, or `carpathian` — or two to eight inline hex colors, which avz resamples
+in Oklab onto the five slots a shader reads:
+
+```bash
+avz render song.mp3 --palette glacier
+avz render song.mp3 --palette '#1a1a2e,#e94560,#ffd93d'
+```
 
 ## Requirements
 

@@ -333,6 +333,64 @@ fn presets_of_an_unknown_preset_exits_2_and_names_the_known_ones() {
         .stderr(contains("pulse"));
 }
 
+/// A typo'd `--palette` is the user's argument: exit 2, name the typo, and list
+/// every palette that does exist — before the song is decoded.
+#[test]
+fn render_with_an_unknown_palette_exits_2_and_names_the_known_ones() {
+    let path = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().join("out.mp4");
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--out")
+        .arg(&out)
+        .args(["--palette", "embers"])
+        .assert()
+        .code(2)
+        .stderr(contains("unknown palette `embers`"))
+        .stderr(contains("glacier"))
+        .stderr(contains("carpathian"));
+
+    assert!(
+        !out.exists(),
+        "a rejected palette must not leave a render behind"
+    );
+}
+
+/// The inline form is spelled for a shell, not for TOML: one comma-separated
+/// argument. A malformed color in it is a usage error naming the entry.
+#[test]
+fn render_with_a_malformed_inline_palette_exits_2_and_names_the_entry() {
+    let path = path_with_fake_ffmpeg();
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .args(["--palette", "#1a1a2e,#gg0000"])
+        .assert()
+        .code(2)
+        .stderr(contains("palette entry 2"));
+}
+
+/// One inline color is a color, not a palette; nine is more than avz resamples.
+#[test]
+fn render_with_an_inline_palette_of_the_wrong_length_exits_2() {
+    let path = path_with_fake_ffmpeg();
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .args(["--palette", "#1a1a2e"])
+        .assert()
+        .code(2)
+        .stderr(contains("2 to 8 colors"));
+}
+
 /// UT-007: a `--set` outside the schema's range fails with exit code 2 before
 /// any rendering starts, and leaves no output file behind.
 #[test]

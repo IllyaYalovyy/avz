@@ -386,7 +386,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 - [x] **Step 15** - Preset schemas: JSON, validation, `--set`, `avz presets`
   *(prerequisite: Step 14)*
-- [ ] **Step 16** - Palettes: named built-ins + inline hex *(prerequisite: Step 15)*
+- [x] **Step 16** - Palettes: named built-ins + inline hex *(prerequisite: Step 15)*
 - [ ] **Step 17** - `nebula` preset: feedback texture plumbing *(prerequisite: Step 15)*
 
 **M4 — Layers** *(accept: config example from VISION §5.5 minus bg-video renders correctly)*

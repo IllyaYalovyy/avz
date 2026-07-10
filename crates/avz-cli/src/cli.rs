@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use avz_core::config::SampleRange;
+use avz_core::config::{Palette, SampleRange};
 use avz_core::render::AdapterChoice;
 use clap::{Args, Parser, Subcommand};
 
@@ -66,6 +66,14 @@ pub struct RenderArgs {
     /// chorus comes back in seconds instead of minutes.
     #[arg(long, value_name = "RANGE")]
     pub sample: Option<SampleRange>,
+
+    /// The color scheme: a built-in name, or two to eight inline hex colors.
+    ///
+    /// `--palette glacier` names one avz ships; `--palette '#1a1a2e,#e94560'`
+    /// spells one out and lets avz resample it onto the five slots a shader
+    /// reads. An unknown name fails with the list of names that exist.
+    #[arg(long, value_name = "NAME|#HEX,#HEX")]
+    pub palette: Option<Palette>,
 
     /// A TOML config file. See `avz config --example` for a documented template.
     #[arg(long, value_name = "FILE")]
@@ -185,6 +193,44 @@ mod tests {
             .expect_err("a range must run forwards");
 
         assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    /// Both spellings of `--palette` from `VISION.md` §3: a built-in name, and
+    /// hex colors the shell can pass without TOML array syntax.
+    #[test]
+    fn palette_accepts_a_built_in_name_and_an_inline_hex_list() {
+        assert_eq!(
+            render_args(&["--palette", "glacier"]).palette,
+            Some(Palette::Named("glacier".to_owned())),
+        );
+
+        let Some(Palette::Inline(colors)) = render_args(&["--palette", "#1a1a2e,#e94560"]).palette
+        else {
+            panic!("expected an inline palette");
+        };
+        assert_eq!(colors.len(), 2);
+    }
+
+    /// A bare render leaves the palette to the config file and the built-in
+    /// default. A flag that defaulted to `ember` would outrank both.
+    #[test]
+    fn a_bare_render_has_no_opinion_about_the_palette() {
+        assert!(render_args(&[]).palette.is_none());
+    }
+
+    /// A malformed palette is caught by clap, before anything else runs. An
+    /// unknown *name* is not malformed — the registry, not the parser, decides
+    /// that, so it fails later with the list of names.
+    #[test]
+    fn a_malformed_palette_is_a_usage_error() {
+        let err =
+            Cli::try_parse_from(["avz", "render", "song.mp3", "--palette", "#gg0000,#000000"])
+                .expect_err("`#gg0000` is not a color");
+        assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+        assert!(
+            err.to_string().contains("palette entry 1"),
+            "the bad entry is named: {err}",
+        );
     }
 
     #[test]
