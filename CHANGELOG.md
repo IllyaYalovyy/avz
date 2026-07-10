@@ -71,6 +71,28 @@ when no API moved, because a config checked into an album repo is an API.
   independent of `needs_feedback`: a preset may ask for either, both, or
   neither. This is the last generic binding RFC-001 planned.
 
+### Fixed
+
+- **The feedback texture cleared to opaque black before the first frame.** The
+  previous-frame history is a premultiplied layer, and before frame 0 there is no
+  layer, so its coverage is zero — but `Feedback::new` cleared it to
+  `wgpu::Color::BLACK`, whose alpha is 1, while every other surface in the
+  renderer already cleared to transparent black. `nebula` averages the trail's
+  alpha into its own coverage, so every `nebula` render (and every `--sample`
+  excerpt of one) opened by hiding the background layer behind a sheet of opaque
+  black that faded down over the first frames, rather than fading the clouds up
+  out of the backdrop. Found while writing `ink`, which carries its state in the
+  alpha channel and would have started every render saturated with ink it never
+  drew.
+
+### Breaking changes
+
+- **`nebula` renders differently near the start of a render.** The feedback fix
+  above changes the first frames of any `nebula` render — the opening no longer
+  fades down from black — and its golden hashes moved at frames 0, 10, and 100.
+  Same input and same config, different video, as the preamble warns. No config
+  key changed.
+
 ## [0.1.0] - unreleased
 
 The first usable release. `avz render song.mp3` decodes an mp3, extracts its
