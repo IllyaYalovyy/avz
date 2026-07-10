@@ -1,0 +1,6 @@
+# Golden frame hashes for the `ink` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 18afb4a4308a448460f7a1271b7ca84de66a542f538db581e72a5a8a61c332cc
+10 0dc726a2cbb7669e347a49afacaaadf657a2557d519386dc8127074924a321eb
+100 a3b487e8568dabaefa72631ea966fa311dbe0de86926aa4ebb2d5a77be448037

@@ -12,6 +12,31 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`ink` preset.** Ink is dropped into still water on every onset, spreads, feeds
+  on the clean water around it, starves where the water is already black, and
+  dissolves everywhere else. What is left is a slow, brooding marble that never
+  repeats. `rms_env` is the growth rate: a loud passage makes the ink invade, and
+  a silence dissolves it back to the backdrop. The last preset deferred by RFC-001
+  NG1, which closes that non-goal — and, as it predicted, it needed no new binding.
+  A reaction-diffusion reads the previous frame, and `needs_feedback` already
+  bound it. Three files in `presets/` and one registry row.
+
+  The field lives in the **alpha channel**, which for a premultiplied layer
+  (`VISION.md` §5.3) is not a trick but an identity: the alpha *is* the ink's
+  density, and the RGB is what that density looks like under the palette. So a
+  palette change repaints the ink instead of smearing old colors into it, and
+  `ink` cannot blow the frame out — it can never emit more light than it covers.
+  The model is Gray-Scott with its solvent eliminated; `crowd` above 1.0 is what
+  keeps the frame from filling, since a pixel whose neighbourhood is already dense
+  starves, stops growing, and hollows out while its front eats outward.
+
+  `steps` is a *reaction* sub-step, not a render pass. The reaction is local and
+  stiff and takes `steps` Euler steps inside the one fragment shader; the
+  diffusion takes exactly one, at the lattice's stability limit, because mixing
+  twice toward a frozen 3×3 blur only gets closer to that same blur. Iterating it
+  for real would mean drawing the preset `steps` times a frame — a change to the
+  render contract. Recorded in RFC-001 NG1.
+
 - **`kaleido` preset.** The frame is cut into wedges around its centre and every
   wedge is made a reflection of its neighbour, so the petals, rings, and grain
   drawn inside one are drawn symmetrically in all of them. The fold turns, the

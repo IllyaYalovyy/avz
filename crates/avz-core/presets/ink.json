@@ -1,0 +1,114 @@
+{
+  "needs_feedback": true,
+  "perf_hint": "frame time scales with pixel count, not with `steps` — the nine texture samples of the previous frame and the readback dominate, so on software rendering eight reaction sub-steps cost under 10% more than one, not eight times more. Turn `steps` down to slow the ink down, not to speed the render up; preview with `--sample 10s` before committing to 1080p, which is a little over twice the work of 720p",
+  "params": [
+    {
+      "name": "diffusion",
+      "type": "float",
+      "default": 0.28,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [0, 0],
+      "description": "How far the ink bleeds into the water around it each frame."
+    },
+    {
+      "name": "growth",
+      "type": "float",
+      "default": 0.9,
+      "min": 0.0,
+      "max": 4.0,
+      "slot": [0, 1],
+      "description": "How hard the ink makes more of itself. Scaled by the loudness of the song."
+    },
+    {
+      "name": "dissolve",
+      "type": "float",
+      "default": 0.04,
+      "min": 0.0,
+      "max": 0.2,
+      "slot": [0, 2],
+      "description": "How fast the ink gives up. Above about a quarter of the growth rate it wins, and a passage clears the frame."
+    },
+    {
+      "name": "crowd",
+      "type": "float",
+      "default": 1.7,
+      "min": 0.6,
+      "max": 2.0,
+      "slot": [0, 3],
+      "description": "How much water a neighbour's ink uses up. Above 1.0 a dense blob starves, stops filling, and hollows out."
+    },
+    {
+      "name": "steps",
+      "type": "int",
+      "default": 4,
+      "min": 1,
+      "max": 8,
+      "slot": [1, 0],
+      "description": "Reaction sub-steps per frame: how far the ink gets in a thirtieth of a second, and how sharp its fronts are."
+    },
+    {
+      "name": "seed_rate",
+      "type": "float",
+      "default": 0.045,
+      "min": 0.0,
+      "max": 0.2,
+      "slot": [1, 1],
+      "description": "How much new ink the song feeds into the water between hits."
+    },
+    {
+      "name": "detail",
+      "type": "float",
+      "default": 3.4,
+      "min": 0.5,
+      "max": 8.0,
+      "slot": [1, 2],
+      "description": "How many blooms of new ink span the short edge of the frame."
+    },
+    {
+      "name": "swirl",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [1, 3],
+      "description": "How hard the bass stirs the water the ink is drifting in."
+    },
+    {
+      "name": "flash",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [2, 0],
+      "description": "How much ink an onset drops into the middle of the frame."
+    },
+    {
+      "name": "hue_cycle",
+      "type": "float",
+      "default": 0.03,
+      "min": 0.0,
+      "max": 0.5,
+      "slot": [2, 1],
+      "description": "How fast the palette walks under the ink, in cycles per second."
+    },
+    {
+      "name": "vignette",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [2, 2],
+      "description": "How far from the walls of the dish the ink stops being able to grow."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [2, 3],
+      "description": "How much light the ink gives back. It can never emit more than it covers."
+    }
+  ]
+}

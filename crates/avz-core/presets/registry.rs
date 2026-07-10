@@ -46,4 +46,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("kaleido.wgsl"),
         schema: include_str!("kaleido.json"),
     },
+    Preset {
+        name: "ink",
+        description: "slow and brooding: a reaction-diffusion marble the loudness of the song grows",
+        source: include_str!("ink.wgsl"),
+        schema: include_str!("ink.json"),
+    },
 ];
