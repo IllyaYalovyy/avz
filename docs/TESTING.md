@@ -96,11 +96,50 @@ forbids `Instant::now()` under `crates/avz-core/src`. It is `#[ignore]`d, since 
 loaded machine would make it flake as a per-commit gate; run it with
 `cargo test -p avz-core --test analysis_perf -- --ignored`.
 
-**Golden frames.** Render specific `(preset, seed, synthetic-feature)` frames to
-PNG with `--adapter software` and compare hashes in CI. The software adapter is
-what makes this stable across machines; never run golden tests on a hardware
-adapter, because GPU float differences are expected. This catches shader
-regressions cheaply.
+**Golden frames.** `crates/avz-core/tests/golden_frames.rs` renders specific
+`(preset, seed, synthetic-feature)` frames on the software adapter and compares
+the sha256 of their RGBA bytes against `crates/avz-core/tests/golden/<preset>.txt`.
+The software adapter is what makes this stable across machines; never run golden
+tests on a hardware adapter, because GPU float differences are expected, and
+`scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` enforces it.
+This catches shader regressions cheaply.
+
+The feature frames are *hand-written*, not analyzed from the fixture. That is
+the point: a golden frame whose input came out of the DSP would be rewritten by
+every change to the DSP, and would then stop saying anything about the shader.
+
+**Regenerating golden hashes.** When a preset changes on purpose:
+
+```bash
+AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+```
+
+That rewrites the hash files; commit them with the shader change and say in the
+message what moved. Regenerating to turn a red test green without looking at why
+it went red throws the only shader coverage in the project away. Two things can
+turn it red legitimately: an intended shader edit, and a Mesa upgrade that
+changes lavapipe's rounding. The `every_feature_pulse_reacts_to_changes_the_frame`
+and `same_inputs_same_hash_twice` tests stay green through the second, so a
+regenerate is safe when only the hashes moved and nothing else did.
+
+**The preset contract.** A preset is one WGSL file in `crates/avz-core/presets/`
+plus a row in `render::preset::PRESETS`. `every_preset_declares_the_whole_globals_contract`
+checks that its `struct Globals` still spells out the `VISION.md` §6 members,
+because a preset that renamed one would compile against its own struct and read
+the wrong feature at that offset. The Rust side of that boundary is
+`globals_layout_matches_wgsl`, which pins every member's byte offset — the
+uniform is encoded by hand, field by field, since `avz-core` is
+`forbid(unsafe_code)` and cannot transmute a `#[repr(C)]` struct into bytes.
+The two tests meet in the middle: `min_binding_size` on the bind-group layout
+makes the driver reject a `Globals` whose size disagrees with the WGSL.
+
+**"Pulse reacts to the music" is an assertion, not a vibe.**
+`every_feature_pulse_reacts_to_changes_the_frame` turns each driving feature up,
+one at a time, and demands the frame change. A uniform field that reaches the
+GPU and no pixel — dropped from the shader, or sitting at the wrong offset —
+fails there rather than in a render nobody looks at closely. The M2 criterion
+that kick, vocals, and cymbals read as *distinct* is still the manual listening
+pass; what is automated is that each of them reaches the picture at all.
 
 **Adapter selection.** `--adapter auto|gpu|software` behaves differently
 depending on what the host has, so a developer machine with a GPU never walks
@@ -211,8 +250,15 @@ exists, or `TODO` / `manual` with a reason.
 | `--adapter software` quietly renders on the GPU | Golden frames pass locally and fail everywhere else | Unit + integration | `gpu_refuses_a_software_adapter_and_software_refuses_a_hardware_one`, `the_software_adapter_is_a_cpu_adapter_and_needs_no_warning` |
 | Software fallback happens without a warning, or warns when asked for | The user cannot tell a slow render from a broken one, or is nagged every render | Unit + integration + quality hook | `only_an_auto_render_that_lands_on_software_is_worth_warning_about`, `auto_always_finds_an_adapter_and_flags_a_software_fallback`, `a_gpu_less_host_falls_back_to_software_and_says_so`, `scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh` |
 | A second render backend creeps in (dx12/metal/gles) | Shaders run on an untested path; golden frames stop meaning anything | Quality hook | `scripts/quality.d/60-render-is-vulkan-only.sh` |
-| Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | TODO |
-| Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames + quality hook | `scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh`; golden frames TODO |
+| Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | `every_preset_renders_its_golden_frames`, `a_loud_frame_and_a_quiet_one_are_different_pictures` |
+| Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames + quality hook | `same_inputs_same_hash_twice`, `scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh` |
+| The `Globals` uniform drifts between the Rust struct and the WGSL | Every preset silently reads the wrong feature at that offset, and nothing crashes | Unit + integration | `globals_layout_matches_wgsl`, `the_palette_and_param_arrays_sit_on_sixteen_byte_boundaries`, `every_preset_declares_the_whole_globals_contract`, `every_feature_pulse_reacts_to_changes_the_frame` |
+| A preset ignores a feature it claims to be driven by | The kick, or the cymbals, drive nothing; the video looks alive and reacts to half the song | Integration (pixels) | `every_feature_pulse_reacts_to_changes_the_frame` |
+| `--seed` never reaches the shader's noise | Two seeds render the same video; `--seed` is decoration | Integration (pixels) | `different_seed_different_hash` |
+| A golden test renders on a hardware adapter | The committed hashes are a hash of one laptop; the test fails everywhere else for reasons that look like shader bugs | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |
+| A preset ships with no golden hashes | The one thing that catches shader drift does not cover the new preset | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |
+| `--sample` previews pixels the full render will not draw | The preview is a different video from the one that ships; the preset's clock is the excerpt's, not the song's | Integration (pixels) | `a_sampled_render_writes_exactly_the_frames_of_the_requested_range` |
+| A typo'd `visual.preset` renders something, or fails late | A five-minute decode before a one-word error | Unit + integration | `an_unknown_preset_is_a_config_error_that_names_the_known_ones`, `an_unknown_preset_fails_before_the_song_is_even_decoded` |
 | Rendering starts before analysis has finished | No lookahead, no global normalization — the two-pass design silently becomes one pass | Integration | `progress_reports_the_three_phases_in_order_with_a_frame_total` |
 | Visuals do not react to the audio at all | The one thing avz exists for, and a static video still looks like a successful render | Integration (pixels) | `the_rendered_brightness_visibly_follows_the_loudness_of_the_song` |
 | The assembled binary writes an mp4 no player will open: a stream missing, a frame short, the wrong length | Every seam passes its own tests and the one artifact avz exists to produce is broken | Integration in CI (ffprobe, through the binary) | `a_two_second_software_render_is_a_playable_mp4_with_one_video_and_one_audio_stream` |

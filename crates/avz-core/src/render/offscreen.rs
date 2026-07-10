@@ -170,8 +170,8 @@ impl Offscreen {
 
     /// Fill the whole frame with one linear-space RGBA color.
     ///
-    /// The M1 tracer bullet's entire "shader": brightness follows loudness. Real
-    /// presets arrive in RFC-001 Step 14 and draw through [`Offscreen::view`].
+    /// Presets draw through [`Offscreen::view`] instead; this is what lets the
+    /// readback tests assert on a frame whose every pixel is known exactly.
     ///
     /// The frame is [`FRAME_FORMAT`], so the color is encoded to sRGB on write.
     pub fn clear(&self, gpu: &Gpu, color: [f32; 4]) {

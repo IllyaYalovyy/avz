@@ -216,6 +216,44 @@ specific to this RFC:
   `pipeline::render` analyzes the whole song and only then computes its frame
   range. A preview therefore shows the seconds it previews exactly as the full
   render will, which is the entire point of `--sample`.
+- **The `Globals` uniform is encoded by hand, not by `bytemuck`** (decided in
+  Step 14). VISION §6 fixes the members and their order; WGSL's uniform address
+  space then fixes their offsets — four bytes of padding after `time` so
+  `resolution: vec2<f32>` lands on 8, and both arrays on 16-byte boundaries, for
+  288 bytes in all. Deriving `Pod` would need `unsafe impl`, and `avz-core` is
+  `#![forbid(unsafe_code)]`; it would also hide the padding that is exactly the
+  thing worth reviewing. `Globals::to_bytes` writes each `f32` little-endian at a
+  documented offset, `globals_layout_matches_wgsl` pins every one of them, and
+  `min_binding_size` on the bind-group layout makes the driver reject a shader
+  whose struct disagrees. No new runtime dependency.
+- **The seed reaches WGSL as a fraction, not a `u64`** (decided in Step 14).
+  VISION §6 declares `seed: f32`, and a `u64` does not survive that trip. It is
+  mixed through splitmix64's finalizer and its top 23 bits are laid straight into
+  a mantissa, giving a value in `0.0..1.0` that every adapter represents exactly —
+  so seeding cannot become a source of the float drift golden frames exist to
+  catch. Adjacent seeds avalanche, so `--seed 1` and `--seed 2` are unrelated
+  videos rather than nearly the same one.
+- **Golden frames hash the RGBA bytes, and their features are hand-written**
+  (decided in Step 14). `crates/avz-core/tests/golden_frames.rs` renders three
+  frames per preset at 320×180 on lavapipe and compares a sha256 against
+  `tests/golden/<preset>.txt`, regenerated with `AVZ_UPDATE_GOLDEN=1`. The
+  `FeatureFrame`s are written out in the test rather than analyzed from the
+  fixture: a golden frame fed by the DSP would be rewritten by every DSP change
+  and would stop saying anything about the shader. `sha2` is a dev-dependency
+  only; nothing in the shipped binary hashes anything. A Mesa upgrade can move
+  the hashes, which is why the harness also carries assertions that survive one —
+  `same_inputs_same_hash_twice` and `every_feature_pulse_reacts_to_changes_the_frame`.
+- **`pulse` drives on envelopes, and loudness is the last word** (decided in
+  Step 14). `bass_env` swells the core disc, `mid_env` packs the rings,
+  `low_mid_env` drifts them outward, `high_env` lights the seeded sparkle grid,
+  `air_env` adds grain, `flux` glows the edge, `onset` snaps and flashes, and
+  `centroid` walks the hue along the palette's accent ramp. The whole frame is
+  then scaled by `rms_env`, so a quiet passage goes nearly black instead of
+  sitting at half brightness — and so "brightness follows loudness" stays an
+  observable property of the assembled pipeline
+  (`the_rendered_brightness_visibly_follows_the_loudness_of_the_song`). The raw
+  features are in the uniform and unused by `pulse`; `nebula` and `particles` are
+  what they are for.
 - **Remote CI is advisory** (owner decision, 2026-07-09). The local
   `./scripts/quality.sh` gate — tests plus the invariant hooks in
   `scripts/quality.d/` — is the authority for "done". The workflow Step 10
@@ -293,7 +331,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 - [x] **Step 11** - Full FFT features: bands, flux, centroid *(prerequisite: Step 6)*
 - [x] **Step 12** - Onset detection: adaptive median+MAD threshold *(prerequisite: Step 11)*
 - [x] **Step 13** - Envelope followers + two-pass normalization *(prerequisite: Step 11)*
-- [ ] **Step 14** - `pulse` preset on the full Globals uniform contract + golden-frame
+- [x] **Step 14** - `pulse` preset on the full Globals uniform contract + golden-frame
   harness; manual envelope-tuning pass *(prerequisite: Steps 9, 12, 13)*
 
 **M3 — Preset system** *(accept: params adjustable via config and `--set`; preset #3 would touch only `presets/`)*

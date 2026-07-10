@@ -181,23 +181,43 @@ fn recorded_frames(path: &Path) -> Vec<Vec<u8>> {
     raw.chunks_exact(FRAME_BYTES).map(<[u8]>::to_vec).collect()
 }
 
-/// The sRGB encoding of a linear value, per the sRGB transfer function.
+/// How bright one frame is, on average: Rec. 709 luma over every pixel.
 ///
-/// Spelled out here rather than read from the renderer: the render target is
-/// `Rgba8UnormSrgb`, so a linear clear value of `x` must arrive at the encoder
-/// as this byte. An independent implementation is the point.
-fn srgb_byte(linear: f32) -> u8 {
-    let encoded = if linear <= 0.003_130_8 {
-        12.92 * linear
-    } else {
-        1.055 * linear.powf(1.0 / 2.4) - 0.055
-    };
-    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
+/// A preset draws geometry, not a flat field, so no single pixel stands for the
+/// frame. The mean does, and `pulse` scales its whole picture by the loudness
+/// envelope — which is what the brightness test below observes.
+fn mean_luma(frame: &[u8]) -> f64 {
+    let total: f64 = frame
+        .chunks_exact(4)
+        .map(|pixel| {
+            0.2126 * f64::from(pixel[0])
+                + 0.7152 * f64::from(pixel[1])
+                + 0.0722 * f64::from(pixel[2])
+        })
+        .sum();
+    total / f64::from(WIDTH * HEIGHT)
 }
 
-/// Rounding differences between lavapipe's linear→sRGB encode and the formula
-/// above. One byte is expected; two is slack.
-const SRGB_TOLERANCE: i32 = 2;
+/// Pearson correlation of two equally long tracks.
+///
+/// "Brightness follows loudness" is a claim about the shape of two curves, not
+/// about any one frame's value — a preset is free to draw rings and sparkle on
+/// top. Correlation states it without hard-coding what `pulse` draws.
+fn correlation(xs: &[f64], ys: &[f64]) -> f64 {
+    assert_eq!(xs.len(), ys.len());
+    let mean = |values: &[f64]| values.iter().sum::<f64>() / values.len() as f64;
+    let (mx, my) = (mean(xs), mean(ys));
+
+    let covariance: f64 = xs
+        .iter()
+        .zip(ys)
+        .map(|(x, y)| (x - mx) * (y - my))
+        .sum::<f64>();
+    let spread =
+        |values: &[f64], m: f64| values.iter().map(|v| (v - m).powi(2)).sum::<f64>().sqrt();
+
+    covariance / (spread(xs, mx) * spread(ys, my))
+}
 
 /// A [`Progress`] that remembers everything it was told.
 #[derive(Debug, Default)]
@@ -283,47 +303,52 @@ impl Progress for Recorder {
 /// the frames that come out are the frames of *that* excerpt, not of the start of
 /// the song. An off-by-one in the frame range would leave the picture a frame
 /// away from the music for the whole render.
+///
+/// The reference is the full render's own frames. That pins the sharper promise
+/// too: a `--sample` preview draws exactly the pixels the final render will draw
+/// at those timestamps, so the preset's clock is the *song's* frame index and
+/// not the excerpt's (`VISION.md` §3, "fast iteration").
 #[test]
 fn a_sampled_render_writes_exactly_the_frames_of_the_requested_range() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ffmpeg = recording_ffmpeg(dir.path());
-    let (output, part) = output_paths(dir.path());
+    let (excerpt, part) = output_paths(dir.path());
+    let whole = dir.path().join("whole.mp4");
 
-    let summary = render_fixture(&ffmpeg, &output, Some(sample("1s..2s")), &NoopProgress)
+    let summary = render_fixture(&ffmpeg, &excerpt, Some(sample("1s..2s")), &NoopProgress)
         .expect("the fixture renders");
+    render_fixture(&ffmpeg, &whole, None, &NoopProgress).expect("the whole fixture renders");
 
     assert_eq!(summary.frames, 30, "one second at 30 fps");
     assert_eq!(summary.duration(), Duration::from_secs(1));
     assert_eq!(summary.adapter, AdapterKind::Software);
     assert!(!part.exists(), "the part file is renamed on success");
 
-    let frames = recorded_frames(&output);
-    assert_eq!(frames.len(), 30);
+    let sampled = recorded_frames(&excerpt);
+    let complete = recorded_frames(&whole);
+    assert_eq!(sampled.len(), 30);
 
-    // Frame `i` of the sample is video frame `30 + i` of the song, and its
-    // brightness is that frame's RMS, sRGB-encoded by the render target.
-    let timeline = fixture_timeline();
-    for (offset, frame) in frames.iter().enumerate() {
-        let expected = srgb_byte(timeline.frame(30 + offset).rms);
-        let [red, green, blue, alpha] = [frame[0], frame[1], frame[2], frame[3]];
-
+    for (offset, frame) in sampled.iter().enumerate() {
         assert_eq!(
-            (red, green, blue),
-            (red, red, red),
-            "frame {offset} is not the grey the tracer bullet draws"
-        );
-        assert_eq!(alpha, 255, "frame {offset} is translucent");
-        assert!(
-            (i32::from(red) - i32::from(expected)).abs() <= SRGB_TOLERANCE,
-            "frame {offset} (song frame {}) is {red}, expected {expected}",
+            frame,
+            &complete[30 + offset],
+            "sample frame {offset} is not song frame {}",
             30 + offset,
         );
     }
+
+    let opaque = sampled[0].chunks_exact(4).all(|pixel| pixel[3] == 255);
+    assert!(opaque, "the visualizer layer renders a translucent frame");
 }
 
 /// The M1 acceptance criterion, observed on real pixels: brightness visibly
 /// follows loudness. A shader that ignored the timeline would pass every
 /// assertion above about frame *counts* and none of this one.
+///
+/// `pulse` scales its whole picture by `rms_env`, the loudness envelope, so the
+/// two curves must rise and fall together over the second the fixture's kick
+/// decays through four times. Correlation rather than a per-frame value: rings,
+/// sparkle, and the onset flash are all free to draw on top.
 #[test]
 fn the_rendered_brightness_visibly_follows_the_loudness_of_the_song() {
     let dir = tempfile::tempdir().expect("tempdir");
@@ -332,32 +357,29 @@ fn the_rendered_brightness_visibly_follows_the_loudness_of_the_song() {
 
     render_fixture(&ffmpeg, &output, Some(sample("0s..1s")), &NoopProgress).expect("renders");
 
-    let brightness: Vec<u8> = recorded_frames(&output)
+    let brightness: Vec<f64> = recorded_frames(&output)
         .iter()
-        .map(|frame| frame[0])
+        .map(|frame| mean_luma(frame))
         .collect();
     let timeline = fixture_timeline();
+    let loudness: Vec<f64> = (0..brightness.len())
+        .map(|index| f64::from(timeline.frame(index).rms_env))
+        .collect();
 
-    let darkest = *brightness.iter().min().expect("frames were rendered");
-    let brightest = *brightness.iter().max().expect("frames were rendered");
+    let darkest = brightness.iter().copied().fold(f64::MAX, f64::min);
+    let brightest = brightness.iter().copied().fold(f64::MIN, f64::max);
     assert!(
-        u32::from(brightest) - u32::from(darkest) > 20,
+        brightest - darkest > 10.0,
         "the kick decays four times in this second; brightness barely moved: \
-         {darkest}..{brightest}"
+         {darkest:.1}..{brightest:.1}"
     );
 
-    // Loudness and brightness rise and fall together, frame for frame.
-    for (index, &shown) in brightness.iter().enumerate() {
-        for (other, &also_shown) in brightness.iter().enumerate() {
-            let louder = timeline.frame(index).rms - timeline.frame(other).rms;
-            if louder > 0.05 {
-                assert!(
-                    shown > also_shown,
-                    "frame {index} is louder than frame {other} but not brighter"
-                );
-            }
-        }
-    }
+    let together = correlation(&loudness, &brightness);
+    assert!(
+        together > 0.9,
+        "brightness and loudness only correlate at {together:.3}: the visuals are \
+         not following the song"
+    );
 }
 
 #[test]
@@ -497,6 +519,39 @@ fn a_gpu_less_auto_render_warns_once_and_says_how_to_silence_it() {
         warning.contains("--adapter software"),
         "say how to silence it: {warning}"
     );
+}
+
+/// A typo'd `visual.preset` is the user's argument too, and they should hear
+/// about it before a five-minute song is decoded, not after.
+#[test]
+fn an_unknown_preset_fails_before_the_song_is_even_decoded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.visual.preset = "pulze".to_owned();
+
+    let _device = one_device_at_a_time();
+    let err = render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: None,
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect_err("there is no preset called `pulze`");
+
+    assert!(matches!(err, Error::Config(_)), "got {err:?}");
+    assert!(
+        err.to_string().contains("pulse"),
+        "name what does exist: {err}"
+    );
+    assert!(!output.exists() && !part.exists(), "nothing was written");
 }
 
 /// A sample the song cannot satisfy is the user's argument, not a render

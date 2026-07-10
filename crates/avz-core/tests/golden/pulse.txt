@@ -1,0 +1,6 @@
+# Golden frame hashes for the `pulse` preset: sha256 of the RGBA bytes of a
+# 320x180 software-adapter render, seed 1337, synthetic features.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 d3af9d14448f08020aecca3a7c441e2664c575c0fd41c2d718464655303f1712
+10 0b8c9e2d387c51b83979eaf3a03714344df02071df4e8695b6f1584af5105964
+100 8680dc5a4464d68d8b16ee0778382a796b785959bd9a5be6a770cd11995989a5

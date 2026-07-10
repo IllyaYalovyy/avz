@@ -12,9 +12,13 @@
 //! Populated by RFC-001 Steps 7, 14, 17, 18, 19, and 20.
 
 pub mod adapter;
+pub mod globals;
 pub mod offscreen;
+pub mod preset;
 pub mod readback;
 
 pub use adapter::{AdapterChoice, AdapterKind};
+pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
 pub use offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+pub use preset::{PRESETS, Preset, Visualizer};
 pub use readback::RowLayout;
