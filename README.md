@@ -19,11 +19,11 @@ request that does not serve it goes to the backlog.
 
 **Status:** v0.1. The whole pipeline runs: decode, full FFT analysis with
 envelopes and onsets, a preset on the GPU, a background image and a title card
-composited over it, ffmpeg encode with the original audio muxed untouched. Four
-presets ship — `pulse`, `nebula`, `ribbons`, and `particles` — selected with
-`--preset`. See [CHANGELOG.md](CHANGELOG.md) for what landed and what is
-deliberately absent (two more presets, the looped background video, and every
-codec but x264).
+composited over it, ffmpeg encode with the original audio muxed untouched. Five
+presets ship — `pulse`, `nebula`, `ribbons`, `particles`, and `kaleido` —
+selected with `--preset`. See [CHANGELOG.md](CHANGELOG.md) for what landed and
+what is deliberately absent (one more preset, the looped background video, and
+every codec but x264).
 
 **Presets.** `avz presets` lists them; `avz presets <name>` prints the
 parameters, their defaults and ranges, and any note about software rendering:

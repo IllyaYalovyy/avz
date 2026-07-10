@@ -38,10 +38,11 @@ developed test-first per `docs/TESTING.md`.
 - **NG1** - The four remaining v1 presets (`ribbons`, `particles`, `kaleido`,
   `ink`) and the spectrum texture binding only `ribbons` consumes. Tracked as
   backlog issues; adding them later must not require core changes (that is G3).
-  **Partly landed post-MVP (issues #24, #25):** the spectrum texture binding and
-  `ribbons`, then the onset-history binding and `particles`. Both bindings were
-  core work, as this non-goal anticipated, and both presets were three files in
-  `presets/`, which is G3 holding. `kaleido` and `ink` remain.
+  **Partly landed post-MVP (issues #24, #25, #26):** the spectrum texture binding
+  and `ribbons`, then the onset-history binding and `particles`, then `kaleido`
+  on no binding at all. The two bindings were core work, as this non-goal
+  anticipated; all three presets were three files in `presets/`, which is G3
+  holding. `ink` remains.
 
   The onset-history binding was *not* planned — #24 landed believing the spectrum
   was the last generic binding this design would need. `particles` proved
@@ -57,6 +58,16 @@ developed test-first per `docs/TESTING.md`.
   one frame's inputs. `kaleido` and `ink` are expected to need no fourth binding —
   a fold and a reaction-diffusion read the layer beneath them and the previous
   frame, both of which already exist.
+
+  **#26 confirmed that for `kaleido`, and asked for less than expected.** VISION
+  §6 calls it an "any-layer kaleidoscope post-fold", but a preset draws its own
+  premultiplied layer and cannot read the layers under it (§5.3) — the only layer
+  it can fold is the previous copy of its own, through `needs_feedback`. Folding
+  a procedural source instead costs nothing and reads the same: a kaleidoscope is
+  its symmetry, not the glass it is cut from. So `kaleido` declares none of the
+  three optional bindings, and its diff is the first to touch `presets/` and the
+  docs alone. Reading the layer beneath a preset would be a change to the
+  compositor's contract, and belongs in an RFC rather than in a shader.
 - **NG2** - Looped background video. The layer-stack design accounts for it, but
   the second-ffmpeg-reader thread ships post-MVP.
 - **NG3** - Codec matrix beyond x264 (`--codec x265|av1` deferred; `--quality`

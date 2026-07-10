@@ -12,6 +12,22 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`kaleido` preset.** The frame is cut into wedges around its centre and every
+  wedge is made a reflection of its neighbour, so the petals, rings, and grain
+  drawn inside one are drawn symmetrically in all of them. The fold turns, the
+  rings travel outward, and the palette walks under both. The third preset
+  deferred by RFC-001 NG1 to land, and the first to need nothing from the
+  renderer: no feedback texture, no spectrum, no onset history — a fold is a
+  function of the fragment's own polar coordinates and the uniform every preset
+  receives. Three files in `presets/` and one registry row, which is G3 holding
+  with no core change at all behind it.
+
+  `time` reaches the picture through exactly three knobs — `spin`, `drift`, and
+  `hue_cycle` — and a test sets all three to zero and demands the same features
+  render the same frame three seconds apart, which is where a stray `sin(time)`
+  would otherwise hide. The grain is sampled in the *folded* coordinates rather
+  than at the fragment's own position: per-pixel grain would break the symmetry
+  the whole preset is for, and break it invisibly.
 - **`particles` preset.** Every hit throws a burst of sparks out of the middle of
   the frame; they fly, slow against the air, fall, dim, and go out, and the highs
   make the ones still burning twinkle. The second preset deferred by RFC-001 NG1
