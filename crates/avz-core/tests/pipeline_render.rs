@@ -19,7 +19,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use avz_core::analysis::{self, FeatureTimeline};
@@ -110,13 +110,42 @@ fn system_ffmpeg() -> Ffmpeg {
     preflight(DEFAULT_PROGRAM).expect("the pipeline tests need ffmpeg: `sudo dnf install ffmpeg`")
 }
 
+/// Only one Vulkan device may be open in this process at a time.
+///
+/// wgpu names every command encoder through `VK_EXT_debug_utils`, and the Vulkan
+/// loader's `SetDebugUtilsObjectNameEXT` terminator walks its device list without
+/// holding a lock. A test that is submitting frames while a sibling test opens or
+/// closes a device therefore segfaults inside `loader_get_icd_and_device`
+/// (`/lib64/libvulkan.so.1`) — which crashed this test binary on about one run in
+/// three, and `cargo test --all-targets` with it.
+///
+/// `avz` opens exactly one device per process, so this is a property of a test
+/// harness that runs its tests in parallel threads, not of the pipeline. Holding
+/// this lock for the lifetime of each `Gpu` gives the tests what production
+/// already has.
+static ONE_DEVICE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+/// Claim the process's one Vulkan device for the rest of the current scope.
+///
+/// A poisoned lock means some sibling test already panicked. Its failure is the
+/// interesting one, so this test carries on rather than adding a second.
+fn one_device_at_a_time() -> MutexGuard<'static, ()> {
+    ONE_DEVICE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
 /// Render the fixture on lavapipe, into whatever `ffmpeg` does with the frames.
+///
+/// Takes [`one_device_at_a_time`] for the whole render, so callers must not hold
+/// it already: the lock is not reentrant.
 fn render_fixture(
     ffmpeg: &Ffmpeg,
     output: &Path,
     sample: Option<SampleRange>,
     progress: &dyn Progress,
 ) -> Result<RenderSummary, Error> {
+    let _device = one_device_at_a_time();
     let config = config();
     render(
         &RenderRequest {
@@ -394,6 +423,7 @@ fn a_gpu_less_auto_render_warns_once_and_says_how_to_silence_it() {
     let (output, _) = output_paths(dir.path());
     let recorder = Recorder::default();
 
+    let _device = one_device_at_a_time();
     let config = config();
     render(
         &RenderRequest {
@@ -474,6 +504,9 @@ fn an_input_that_will_not_decode_is_an_input_error() {
     let not_audio = dir.path().join("not-audio.mp3");
     fs::write(&not_audio, b"this is not an mp3").expect("write");
 
+    // Decode fails before an adapter is ever requested, but the lock costs
+    // nothing and survives a pipeline that one day opens the device earlier.
+    let _device = one_device_at_a_time();
     let config = config();
     let err = render(
         &RenderRequest {
