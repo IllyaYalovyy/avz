@@ -24,8 +24,16 @@
 // the excerpt converges within a second and looks like the full render after
 // that.
 //
-// Output is linear — the render target is `Rgba8UnormSrgb` and encodes on write,
+// Output is linear — the layer target is `Rgba8UnormSrgb` and encodes on write,
 // and the feedback texture decodes on sample, so the blend below is in light.
+//
+// Output is also **premultiplied** (VISION.md §5.3): the RGB is the light this
+// layer emits and the alpha is how much of the backdrop beneath it that light
+// hides. The trail carries both — the previous frame's alpha is averaged with
+// this frame's exactly as its color is — so a cloud fading out fades back to the
+// palette gradient rather than to black. The feedback texture is this preset's
+// own layer, never the composited frame, so the backdrop is never smeared into
+// a trail.
 //
 // The `params` slots below are declared in `nebula.json`, which is the only place
 // their names, defaults, and ranges live.
@@ -194,12 +202,16 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     emission *= 1.0 - vignette * smoothstep(0.30, 0.95, r);
     emission = clamp(emission, vec3<f32>(0.0), vec3<f32>(1.0));
 
+    // Coverage is the brightest channel of the light, as in `pulse`: the denser
+    // the cloud, the less of the backdrop it lets through. Thin cloud is a veil.
+    let cover = clamp(max(emission.r, max(emission.g, emission.b)), 0.0, 1.0);
+
     // Advect the previous frame along the flow, drifting it slightly inward.
     // `uv` runs y down while `flow` was built y up, so the y component is negated
     // on the way back.
     let drift = vec2<f32>(flow.y, -flow.x) * 0.012 * churn;
     let previous_uv = 0.5 + (uv - 0.5) * 0.997 + drift * vec2<f32>(1.0, -1.0);
-    let trail = textureSample(previous, previous_sampler, previous_uv).rgb;
+    let trail = textureSample(previous, previous_sampler, previous_uv);
 
     // An exponential average of the emission, sampled where the flow carried it:
     // the picture lags the clouds by `trail_decay` and smears along their motion,
@@ -207,16 +219,20 @@ fn fs_main(@builtin(position) position: vec4<f32>) -> @location(0) vec4<f32> {
     // hundred frames of overlapping cloud from unioning into white and losing the
     // palette — the steady state of this blend is the emission itself.
     //
-    // The cost is that a render fades in from black over the first few frames,
+    // Alpha rides along: the trail's coverage is averaged with this frame's, so a
+    // wisp thins out as its light does and the backdrop reappears behind it.
+    //
+    // The cost is that a render fades in from nothing over the first few frames,
     // frame 0 having no history. A `--sample` excerpt does the same.
-    var color = mix(emission, trail, trail_decay);
+    var color = mix(vec4<f32>(emission, cover), trail, trail_decay);
 
     // A hit lands on the beat and not after it: `onset` is 1.0 on exactly the
     // frame the flux peaked (`analysis::onset`). The burst is added on top of the
     // average rather than into it, so it flashes at full strength on that frame,
-    // then enters the history and rides outward on the flow as it decays.
+    // then enters the history and rides outward on the flow as it decays. It
+    // covers what it lights, so it carries its own alpha up with it.
     let burst = g.onset * burst_strength * exp(-6.0 * r) * (0.35 + 0.65 * density);
-    color += counter_hue * burst;
+    color += vec4<f32>(counter_hue * burst, burst);
 
-    return vec4<f32>(clamp(color, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return clamp(color, vec4<f32>(0.0), vec4<f32>(1.0));
 }

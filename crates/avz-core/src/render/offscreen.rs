@@ -97,8 +97,10 @@ impl Gpu {
 
 /// A `width × height` RGBA texture and the buffer its pixels are read back into.
 ///
-/// Built once per render and reused for every frame: the texture is re-drawn and
-/// the readback buffer re-copied, so a five-minute song allocates this once.
+/// The frame the compositor flattens the layer stack into, and the only texture
+/// that is ever read back. Built once per render and reused for every frame: the
+/// texture is re-drawn and the readback buffer re-copied, so a five-minute song
+/// allocates this once.
 #[derive(Debug)]
 pub struct Offscreen {
     layout: RowLayout,
@@ -163,23 +165,21 @@ impl Offscreen {
         self.layout
     }
 
-    /// The view presets and the compositor render into.
+    /// The view the compositor renders into.
+    ///
+    /// Presets never touch it: they draw into their own
+    /// [`Layer`](crate::render::Layer), and
+    /// [`Compositor::composite`](crate::render::Compositor::composite) flattens
+    /// the stack into this.
     pub fn view(&self) -> &wgpu::TextureView {
         &self.view
     }
 
-    /// The texture behind [`Offscreen::view`], as a copy source.
-    ///
-    /// Crate-private: the only thing that copies a frame anywhere other than the
-    /// readback buffer is [`Feedback::capture`](crate::render::feedback::Feedback::capture).
-    pub(crate) fn texture(&self) -> &wgpu::Texture {
-        &self.texture
-    }
-
     /// Fill the whole frame with one linear-space RGBA color.
     ///
-    /// Presets draw through [`Offscreen::view`] instead; this is what lets the
-    /// readback tests assert on a frame whose every pixel is known exactly.
+    /// The compositor draws through [`Offscreen::view`] instead; this is what
+    /// lets the readback tests assert on a frame whose every pixel is known
+    /// exactly.
     ///
     /// The frame is [`FRAME_FORMAT`], so the color is encoded to sRGB on write.
     pub fn clear(&self, gpu: &Gpu, color: [f32; 4]) {

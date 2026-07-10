@@ -18,7 +18,8 @@
 
 use crate::render::feedback::Feedback;
 use crate::render::globals::{GLOBALS_SIZE, Globals};
-use crate::render::offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+use crate::render::layer::Layer;
+use crate::render::offscreen::{FRAME_FORMAT, Gpu};
 use crate::render::schema::PresetSchema;
 use crate::{Error, Result};
 
@@ -84,6 +85,10 @@ pub fn names() -> Vec<&'static str> {
 /// change between frames. A preset whose schema declares `needs_feedback` also
 /// owns the [`Feedback`] history its shader samples, which is per-render state —
 /// a second `Visualizer` starts its trails from black again.
+///
+/// A visualizer draws into its own [`Layer`], never into the frame: what a
+/// preset writes is premultiplied light, and what is under it is the
+/// compositor's business (`VISION.md` §5.3).
 #[derive(Debug)]
 pub struct Visualizer {
     pipeline: wgpu::RenderPipeline,
@@ -96,7 +101,7 @@ impl Visualizer {
     /// Compile `preset` and build everything it needs to draw into `target`.
     ///
     /// `target` is taken here rather than only at [`Visualizer::draw`] because a
-    /// feedback preset's history texture must match the frame it mirrors, and a
+    /// feedback preset's history texture must match the layer it mirrors, and a
     /// render has exactly one frame size.
     ///
     /// # Errors
@@ -106,14 +111,13 @@ impl Visualizer {
     /// it samples `@binding(1)` without declaring `needs_feedback`. The presets
     /// are embedded, so both are bugs rather than bad user input, but a message
     /// beats a panic on a driver that rejects what naga accepted.
-    pub fn new(gpu: &Gpu, preset: &Preset, target: &Offscreen) -> Result<Self> {
+    pub fn new(gpu: &Gpu, preset: &Preset, target: &Layer) -> Result<Self> {
         let device = gpu.device();
 
-        let frame = target.layout();
         let feedback = preset
             .schema()?
             .needs_feedback
-            .then(|| Feedback::new(gpu, frame.width(), frame.height()));
+            .then(|| Feedback::new(gpu, target.width(), target.height()));
 
         let errors = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
@@ -212,15 +216,18 @@ impl Visualizer {
         })
     }
 
-    /// Draw one frame of the preset into `target`.
+    /// Draw one frame of the preset into its `target` layer.
     ///
-    /// The fullscreen triangle covers every pixel, so the frame needs no clear of
+    /// What lands there is premultiplied light: where the preset draws nothing it
+    /// writes alpha 0, and the compositor lets the background through untouched.
+    ///
+    /// The fullscreen triangle covers every pixel, so the layer needs no clear of
     /// its own; the `Clear` below only gives the pass a defined load op.
     ///
     /// A feedback preset samples the frame drawn by the previous call — black on
     /// the first — and this call's frame becomes the next one's history. Frames
     /// must therefore be drawn in order, which is what `pipeline::render` does.
-    pub fn draw(&self, gpu: &Gpu, target: &Offscreen, globals: &Globals) {
+    pub fn draw(&self, gpu: &Gpu, target: &Layer, globals: &Globals) {
         gpu.queue()
             .write_buffer(&self.uniforms, 0, &globals.to_bytes());
 
@@ -238,7 +245,7 @@ impl Visualizer {
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

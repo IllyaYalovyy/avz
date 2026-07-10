@@ -22,6 +22,12 @@
 //! shader change and say in the commit message what moved. Never regenerate to
 //! make a red test green without looking at why it went red.
 //!
+//! **The hashes are of composited frames.** Since RFC-001 Step 18 a preset draws
+//! premultiplied light into its own layer and the compositor stacks it over the
+//! palette backdrop (`VISION.md` §5.3), so what reaches the encoder — and what is
+//! hashed here — is the whole layer stack, exactly as `pipeline::render` builds
+//! it. A preset that went transparent would show up as the backdrop alone.
+//!
 //! **Feedback presets are warmed up.** A preset that declares `needs_feedback` is
 //! drawn from frame 0 up to the golden frame, because its picture is a function
 //! of every frame before it. See [`render_hash_on`].
@@ -36,8 +42,8 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use avz_core::analysis::FeatureFrame;
 use avz_core::config::Palette;
 use avz_core::render::{
-    AdapterChoice, BUILT_INS, Globals, Gpu, LinearPalette, Offscreen, PRESETS, PackedParams,
-    ParamKind, Preset, Visualizer, palette,
+    AdapterChoice, BUILT_INS, Backdrop, Compositor, Globals, Gpu, Layer, LinearPalette, Offscreen,
+    PRESETS, PackedParams, ParamKind, Preset, Visualizer, palette,
 };
 use sha2::{Digest, Sha256};
 
@@ -167,6 +173,48 @@ fn needs_feedback(preset: &Preset) -> bool {
         .needs_feedback
 }
 
+/// The layer stack of one render: a backdrop, a visualizer layer over it, and the
+/// compositor that flattens them into the frame that is read back.
+///
+/// The same stack `pipeline::render` builds, at test resolution. `backdrop` is
+/// `None` for the tests that want the preset's own premultiplied light with
+/// nothing under it.
+struct Stage {
+    target: Offscreen,
+    visual: Layer,
+    visualizer: Visualizer,
+    compositor: Compositor,
+}
+
+impl Stage {
+    fn new(gpu: &Gpu, preset: &Preset, colors: LinearPalette, backdrop: Option<Backdrop>) -> Self {
+        let target = Offscreen::new(gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+        let visual = Layer::new(gpu, WIDTH, HEIGHT, "visualizer");
+        let visualizer = Visualizer::new(gpu, preset, &visual).expect("the preset compiles");
+
+        let background = backdrop.map(|style| style.layer(gpu, WIDTH, HEIGHT, colors));
+        let layers: Vec<&Layer> = background.iter().chain([&visual]).collect();
+        let compositor = Compositor::new(gpu, &layers).expect("frame-sized layers");
+
+        Self {
+            target,
+            visual,
+            visualizer,
+            compositor,
+        }
+    }
+
+    fn draw(&self, gpu: &Gpu, globals: &Globals) {
+        self.visualizer.draw(gpu, &self.visual, globals);
+    }
+
+    /// Composite the stack and read the frame back, tightly packed.
+    fn read(&self, gpu: &Gpu) -> Vec<u8> {
+        self.compositor.composite(gpu, &self.target);
+        self.target.read_rgba(gpu).expect("the frame reads back")
+    }
+}
+
 /// Render one preset frame on lavapipe and hash the RGBA bytes.
 ///
 /// Opens its own device, so callers must not already hold [`one_device_at_a_time`].
@@ -186,12 +234,15 @@ fn render_hash_with(
 
 /// [`render_hash_with`], with the palette chosen by the caller too.
 ///
+/// The preset is composited over the default backdrop, which is the stack a
+/// zero-config `avz render` builds.
+///
 /// A preset that samples the previous frame is drawn from frame 0 up to
 /// `frame_index`, exactly as `pipeline::render` would draw it, and only the last
-/// frame is hashed. Hashing a feedback preset's frame 100 in isolation would pin
-/// a picture with no trails in it — which is to say, none of what the preset is
-/// for. A preset without feedback draws the one frame asked for, so `pulse`'s
-/// committed hashes are the ones it always had.
+/// frame is composited and hashed. Hashing a feedback preset's frame 100 in
+/// isolation would pin a picture with no trails in it — which is to say, none of
+/// what the preset is for. A preset without feedback draws the one frame asked
+/// for.
 fn render_hash_on(
     preset: &Preset,
     frame_index: usize,
@@ -202,8 +253,7 @@ fn render_hash_on(
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software)
         .expect("golden frames need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
-    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, preset, &target).expect("the shipped preset compiles");
+    let stage = Stage::new(&gpu, preset, colors, Some(Backdrop::default()));
 
     let first = if needs_feedback(preset) {
         0
@@ -220,9 +270,9 @@ fn render_hash_on(
             colors,
             params,
         );
-        visualizer.draw(&gpu, &target, &globals);
+        stage.draw(&gpu, &globals);
     }
-    let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+    let pixels = stage.read(&gpu);
 
     assert_eq!(pixels.len(), (WIDTH * HEIGHT * 4) as usize);
     hex(&pixels)
@@ -600,8 +650,7 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
     let params = defaults(preset);
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
-    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, preset, &target).expect("pulse compiles");
+    let stage = Stage::new(&gpu, preset, ember(), Some(Backdrop::default()));
 
     let draw = |features: FeatureFrame| {
         let globals = Globals::for_frame(
@@ -613,8 +662,8 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
             ember(),
             params,
         );
-        visualizer.draw(&gpu, &target, &globals);
-        hex(&target.read_rgba(&gpu).expect("the frame reads back"))
+        stage.draw(&gpu, &globals);
+        hex(&stage.read(&gpu))
     };
 
     let still = draw(baseline);
@@ -635,6 +684,51 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
         ..baseline
     });
     assert_ne!(warm, still, "`centroid` never reaches a pixel");
+}
+
+/// Every preset draws a layer the backdrop can be seen through.
+///
+/// The premultiplied contract (`VISION.md` §5.3) is one line at the bottom of a
+/// shader, and it is the easiest line for the next preset author to get wrong:
+/// `return vec4<f32>(color, 1.0)` compiles, renders, hashes, and looks fine on
+/// its own — while covering the background layer with an opaque rectangle in
+/// every render anyone makes with it. Nothing else in this file would notice,
+/// because a golden hash blesses whatever it is shown.
+///
+/// So: on a silent frame, with no backdrop under it, a preset's own layer must
+/// have somewhere it did not fully cover. An opaque shader has no such pixel.
+#[test]
+fn every_preset_draws_a_layer_the_backdrop_shows_through() {
+    for preset in PRESETS {
+        let _device = one_device_at_a_time();
+        let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+        let stage = Stage::new(&gpu, preset, ember(), None);
+
+        // Silence: nothing to draw, so nothing to hide the backdrop with.
+        let globals = Globals::for_frame(
+            10,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            FeatureFrame::default(),
+            ember(),
+            defaults(preset),
+        );
+        stage.draw(&gpu, &globals);
+        let pixels = stage.read(&gpu);
+
+        let opaque = pixels.chunks_exact(4).filter(|px| px[3] == 255).count();
+        assert_eq!(
+            opaque,
+            0,
+            "preset `{}` covers the frame on a silent frame: {opaque} of {} pixels \
+             are opaque. Its fragment shader returns a hardcoded alpha instead of \
+             the coverage of the light it drew, and no background layer will ever \
+             be visible under it.",
+            preset.name,
+            (WIDTH * HEIGHT) as usize,
+        );
+    }
 }
 
 /// `nebula` reads the previous frame, and reads it into the picture.
@@ -658,8 +752,7 @@ fn nebula_frames_depend_on_the_frames_before_them() {
     let cold = {
         let _device = one_device_at_a_time();
         let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
-        let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-        let visualizer = Visualizer::new(&gpu, nebula, &target).expect("nebula compiles");
+        let stage = Stage::new(&gpu, nebula, ember(), Some(Backdrop::default()));
         let globals = Globals::for_frame(
             FRAME,
             FPS,
@@ -669,8 +762,8 @@ fn nebula_frames_depend_on_the_frames_before_them() {
             ember(),
             defaults(nebula),
         );
-        visualizer.draw(&gpu, &target, &globals);
-        hex(&target.read_rgba(&gpu).expect("the frame reads back"))
+        stage.draw(&gpu, &globals);
+        hex(&stage.read(&gpu))
     };
 
     assert_ne!(
@@ -683,14 +776,17 @@ fn nebula_frames_depend_on_the_frames_before_them() {
 /// output" (RFC-001 Step 17). Stable and evolving are the hashes above; that it
 /// is *lit* is this, and a screen-blended trail saturating to white would fail it
 /// as surely as a shader that drew nothing.
+///
+/// The visualizer layer is composited with **no backdrop under it**: with the
+/// palette gradient beneath, every pixel of every frame would be lit and this
+/// test would pass on a `nebula` that had stopped drawing entirely.
 #[test]
 fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
     let nebula = Preset::by_name("nebula").expect("nebula ships");
 
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
-    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, nebula, &target).expect("nebula compiles");
+    let stage = Stage::new(&gpu, nebula, ember(), None);
 
     // Ninety frames is the three seconds `--sample 3s` renders at 30 fps: long
     // enough for the trail to reach whatever level it settles at.
@@ -704,9 +800,9 @@ fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
             ember(),
             defaults(nebula),
         );
-        visualizer.draw(&gpu, &target, &globals);
+        stage.draw(&gpu, &globals);
     }
-    let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+    let pixels = stage.read(&gpu);
 
     let lit = pixels
         .chunks_exact(4)
@@ -787,8 +883,7 @@ fn dump_pulse_tuning_frames() {
 
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
-    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, preset, &target).expect("pulse compiles");
+    let stage = Stage::new(&gpu, preset, ember(), Some(Backdrop::default()));
 
     let params = defaults(preset);
     for (name, features) in cases {
@@ -801,8 +896,8 @@ fn dump_pulse_tuning_frames() {
             ember(),
             params,
         );
-        visualizer.draw(&gpu, &target, &globals);
-        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+        stage.draw(&gpu, &globals);
+        let pixels = stage.read(&gpu);
 
         let path = out.join(format!("{name}.png"));
         image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
@@ -840,7 +935,10 @@ fn dump_nebula_tuning_frames() {
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
     let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
-    let visualizer = Visualizer::new(&gpu, preset, &target).expect("nebula compiles");
+    let background = Backdrop::default().layer(&gpu, WIDE, TALL, ember());
+    let visual = Layer::new(&gpu, WIDE, TALL, "visualizer");
+    let visualizer = Visualizer::new(&gpu, preset, &visual).expect("nebula compiles");
+    let compositor = Compositor::new(&gpu, &[&background, &visual]).expect("two 960x540 layers");
 
     let params = defaults(preset);
     for index in 0..=KEPT[KEPT.len() - 1] {
@@ -864,11 +962,12 @@ fn dump_nebula_tuning_frames() {
             ember(),
             params,
         );
-        visualizer.draw(&gpu, &target, &globals);
+        visualizer.draw(&gpu, &visual, &globals);
 
         if !KEPT.contains(&index) {
             continue;
         }
+        compositor.composite(&gpu, &target);
         let pixels = target.read_rgba(&gpu).expect("the frame reads back");
         let path = out.join(format!("{index:03}.png"));
         image::RgbaImage::from_raw(WIDE, TALL, pixels)

@@ -221,6 +221,25 @@ pub(crate) fn srgb_to_linear(channel: u8) -> f32 {
     }
 }
 
+/// The sRGB opto-electronic transfer function: light becomes the 8-bit channel
+/// that encodes it.
+///
+/// The inverse of [`srgb_to_linear`], written out from its own constants rather
+/// than derived from it, so `srgb_to_linear_round_trip_within_epsilon` is a real
+/// check on both rather than a restatement of one.
+///
+/// Used where avz produces frame bytes with no shader in the way: the background
+/// layer's gradient ([`Backdrop`](crate::render::Backdrop)) is uploaded rather
+/// than drawn, so it must encode itself.
+pub(crate) fn linear_to_srgb(light: f32) -> u8 {
+    let encoded = if light <= 0.003_130_8 {
+        light * 12.92
+    } else {
+        1.055 * light.powf(1.0 / 2.4) - 0.055
+    };
+    (encoded * 255.0).round().clamp(0.0, 255.0) as u8
+}
+
 /// Linear sRGB → Oklab (Björn Ottosson, 2020).
 fn oklab(rgba: [f32; 4]) -> [f32; 3] {
     let [r, g, b, _] = rgba;
@@ -258,18 +277,6 @@ fn oklab_to_linear(lab: [f32; 3]) -> [f32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The sRGB opto-electronic transfer function: the inverse of the one under
-    /// test, written out separately so the round trip is a real check on the
-    /// constants rather than a restatement of them.
-    fn linear_to_srgb(light: f32) -> u8 {
-        let encoded = if light <= 0.003_130_8 {
-            light * 12.92
-        } else {
-            1.055 * light.powf(1.0 / 2.4) - 0.055
-        };
-        (encoded * 255.0).round().clamp(0.0, 255.0) as u8
-    }
 
     fn inline(hexes: &[&str]) -> Palette {
         Palette::inline(

@@ -112,6 +112,11 @@ The feature frames are *hand-written*, not analyzed from the fixture. That is
 the point: a golden frame whose input came out of the DSP would be rewritten by
 every change to the DSP, and would then stop saying anything about the shader.
 
+What is hashed is the *composited* frame: the preset's premultiplied layer over
+the palette backdrop, which is the stack `pipeline::render` builds and the bytes
+ffmpeg receives. Hashing the visualizer layer alone would leave the compositor
+and the backdrop uncovered by the only shader test in the project.
+
 A preset whose schema declares `needs_feedback` is drawn from frame 0 up to the
 golden frame, and only the last frame is hashed. Hashing `nebula`'s frame 100 in
 isolation would pin a picture with no trails in it, which is to say none of what
@@ -131,6 +136,27 @@ turn it red legitimately: an intended shader edit, and a Mesa upgrade that
 changes lavapipe's rounding. The `every_feature_pulse_reacts_to_changes_the_frame`
 and `same_inputs_same_hash_twice` tests stay green through the second, so a
 regenerate is safe when only the hashes moved and nothing else did.
+
+**The compositor.** `crates/avz-core/tests/compositor.rs` pins the layer stack
+(`VISION.md` §5.3) against layers filled with flat colors rather than against a
+preset, because the `over` operator is the compositor's property and would be
+invisible through a shader that also draws rings.
+`premultiply_blend_math_matches_reference` computes three blends by hand — opaque,
+half-covering, transparent — and demands the GPU agree; a non-premultiplied blend
+passes two of the three and misses the middle one by a factor of two.
+`absent_layers_skip_render_passes` probes the *alpha* channel of a lone layer,
+which is the only thing that distinguishes "no background layer was drawn" from
+"a black opaque one was". `visualizer_alpha_zero_shows_background_exactly` closes
+the loop with the real `pulse`: on a silent frame its layer is transparent, and
+the composited frame is byte-for-byte the backdrop alone.
+
+The preset side of that contract is
+`every_preset_draws_a_layer_the_backdrop_shows_through` in `golden_frames.rs`. A
+shader that ends `return vec4<f32>(color, 1.0)` compiles, renders, and hashes
+perfectly well while hiding the background layer under an opaque rectangle in
+every video anyone makes with it. Golden hashes cannot catch that — they bless
+whatever they are shown — so the preset's own layer is composited with nothing
+under it and required to have somewhere it did not cover.
 
 **The preset contract.** A preset is one WGSL file in `crates/avz-core/presets/`,
 one JSON parameter schema beside it, and a row in `presets/registry.rs` — which
@@ -285,6 +311,9 @@ exists, or `TODO` / `manual` with a reason.
 | Software fallback happens without a warning, or warns when asked for | The user cannot tell a slow render from a broken one, or is nagged every render | Unit + integration + quality hook | `only_an_auto_render_that_lands_on_software_is_worth_warning_about`, `auto_always_finds_an_adapter_and_flags_a_software_fallback`, `a_gpu_less_host_falls_back_to_software_and_says_so`, `scripts/quality.d/70-gpu-less-host-falls-back-to-lavapipe.sh` |
 | A second render backend creeps in (dx12/metal/gles) | Shaders run on an untested path; golden frames stop meaning anything | Quality hook | `scripts/quality.d/60-render-is-vulkan-only.sh` |
 | Shader regression changes output silently | Presets drift between releases | Golden frames (software adapter) | `every_preset_renders_its_golden_frames`, `a_loud_frame_and_a_quiet_one_are_different_pictures` |
+| The layer blend is not premultiplied | Half-transparent layers composite at half strength; every background is wrong and nothing errors | Integration (pixels) | `premultiply_blend_math_matches_reference`, `layers_composite_bottom_to_top` |
+| A preset returns a hardcoded opaque alpha | Its layer covers the background layer entirely; `--bg` and the palette backdrop are decoration | Integration (pixels) | `every_preset_draws_a_layer_the_backdrop_shows_through`, `visualizer_alpha_zero_shows_background_exactly` |
+| An absent layer is drawn as a black quad | The bottom of the stack is black rather than empty, and `absent_layers_skip_render_passes` is the only place it shows | Integration (pixels) | `absent_layers_skip_render_passes` |
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames + quality hook | `same_inputs_same_hash_twice`, `scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh` |
 | The `Globals` uniform drifts between the Rust struct and the WGSL | Every preset silently reads the wrong feature at that offset, and nothing crashes | Unit + integration | `globals_layout_matches_wgsl`, `the_palette_and_param_arrays_sit_on_sixteen_byte_boundaries`, `every_preset_declares_the_whole_globals_contract`, `every_feature_pulse_reacts_to_changes_the_frame` |
 | A preset ignores a feature it claims to be driven by | The kick, or the cymbals, drive nothing; the video looks alive and reacts to half the song | Integration (pixels) | `every_feature_pulse_reacts_to_changes_the_frame` |
