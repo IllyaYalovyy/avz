@@ -1,0 +1,85 @@
+{
+  "perf_hint": "the panel is a sliver of the frame and reads nothing but the uniform, so `meter` is the cheapest preset avz ships — if a render is slow, the resolution is what costs, not this",
+  "params": [
+    {
+      "name": "anchor",
+      "type": "enum",
+      "default": "bottom-right",
+      "variants": [
+        "top-left",
+        "top-center",
+        "top-right",
+        "center-left",
+        "center",
+        "center-right",
+        "bottom-left",
+        "bottom-center",
+        "bottom-right"
+      ],
+      "slot": [0, 0],
+      "description": "Which of the nine grid positions the meter sits in, the text card's vocabulary."
+    },
+    {
+      "name": "orientation",
+      "type": "enum",
+      "default": "vertical",
+      "variants": ["vertical", "horizontal"],
+      "slot": [0, 1],
+      "description": "Whether the meter stands and fills upward, or lies down and fills to the right."
+    },
+    {
+      "name": "length",
+      "type": "float",
+      "default": 0.45,
+      "min": 0.1,
+      "max": 1.0,
+      "slot": [0, 2],
+      "description": "The meter's long side, as a fraction of the frame edge it runs along."
+    },
+    {
+      "name": "thickness",
+      "type": "float",
+      "default": 0.05,
+      "min": 0.01,
+      "max": 0.3,
+      "slot": [0, 3],
+      "description": "The meter's short side, as a fraction of the frame's short edge."
+    },
+    {
+      "name": "margin",
+      "type": "float",
+      "default": 0.04,
+      "min": 0.0,
+      "max": 0.4,
+      "slot": [1, 0],
+      "description": "The gap between the meter and the frame's edges, as a fraction of the short edge."
+    },
+    {
+      "name": "segments",
+      "type": "int",
+      "default": 24,
+      "min": 0,
+      "max": 64,
+      "slot": [1, 1],
+      "description": "How many LED segments divide the meter; 0 is a continuous, unbroken bar."
+    },
+    {
+      "name": "track",
+      "type": "float",
+      "default": 0.12,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [1, 2],
+      "description": "How visible the unlit remainder of the meter is, so quiet passages still show the scale."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [1, 3],
+      "description": "How much light the lit segments put out."
+    }
+  ]
+}

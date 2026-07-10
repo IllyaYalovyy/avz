@@ -12,6 +12,15 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`meter`, the second panel preset** (#32). A VU-style level meter: the
+  enveloped loudness fills an anchored ladder of LED `segments` (or a
+  continuous bar at `segments = 0`), standing or lying down by `orientation`,
+  the palette walking its length so a cool-to-hot palette reads as the classic
+  green-amber-red. The topmost lit sliver flashes on the beat. Unlike `bars`,
+  a faint `track` keeps the unlit scale visible, because a meter at zero is
+  information; the track never leaks outside the panel. The cheapest preset
+  avz ships — no binding beyond the uniform.
+
 - **`bars`, the first panel preset** (#31). A spectrum analyzer that lives in
   one anchored rectangle — `anchor` speaks the text card's nine-grid
   vocabulary, `width`/`height`/`margin` size the panel — and leaves every

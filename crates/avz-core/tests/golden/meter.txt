@@ -1,0 +1,6 @@
+# Golden frame hashes for the `meter` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 bfd6a31a912691f0d783b982ed40134af09cbee8cf6c98b87b86d3ef5dbfefb4
+10 30c9b785d4c1d0d37c97ab878394946777fa8bae1a9b1978ba9a4e5e64c8948c
+100 21c2497913f52168a7198894ad8160b8c4afad25e30cdc33f256bd08e30c503f

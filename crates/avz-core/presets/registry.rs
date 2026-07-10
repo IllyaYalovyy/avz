@@ -58,4 +58,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("bars.wgsl"),
         schema: include_str!("bars.json"),
     },
+    Preset {
+        name: "meter",
+        description: "a VU meter in one spot: the loudness as an anchored ladder of LEDs",
+        source: include_str!("meter.wgsl"),
+        schema: include_str!("meter.json"),
+    },
 ];
