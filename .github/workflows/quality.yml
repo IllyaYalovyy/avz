@@ -14,5 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # The render tests are the point of the gate, and neither dependency ships
+      # on the runner image. `ffmpeg` brings `ffprobe`, which every end-to-end
+      # assertion is made through. `mesa-vulkan-drivers` brings lavapipe, the
+      # software Vulkan driver `--adapter software` renders on — CI has no GPU,
+      # and the golden path is the software one anyway (docs/TESTING.md).
+      - name: Install the render toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y ffmpeg mesa-vulkan-drivers
+
       - name: Run quality gate
         run: ./scripts/quality.sh

@@ -47,9 +47,18 @@ manual check into a local one.
 
 **Integration.** A tiny CC0 test mp3 (about 5 s) lives in the repo at
 `assets/fixtures/tone-tagged.mp3`, synthesized by `./scripts/make-test-fixture.sh`
-and described in `assets/fixtures/README.md`. CI runs a
-full `--sample 2s` render at 320×180 on the software adapter and asserts
-`ffprobe` sees the expected duration, one video stream, and one audio stream.
+and described in `assets/fixtures/README.md`.
+
+**End to end, through the binary.** `crates/avz-cli/tests/render_e2e.rs` runs
+`avz render song.mp3 --sample 2s --adapter software` the way a user would, and
+asserts `ffprobe` sees a container with exactly one video stream and one audio
+stream, 60 frames at 30 fps, and a two-second duration. It is the only test that
+covers the assembled binary rather than a seam of it, so it is deliberately
+shallow: pixels belong to `pipeline_render.rs` and bitstreams to
+`encode_ffmpeg.rs`, both of which can see things `ffprobe` cannot. The excerpt
+renders at the 720p `--sample` default, because no CLI flag reaches
+`output.resolution` until the preset system lands (RFC-001 Step 15). CI installs
+`ffmpeg` and `mesa-vulkan-drivers` for it; a GPU is never involved.
 
 **Proving `-c:a copy`.** An audio codec of `mp3` in the output does *not* prove
 the stream was copied: re-encoding an mp3 with `libmp3lame` also reports
@@ -126,6 +135,7 @@ exists, or `TODO` / `manual` with a reason.
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames + quality hook | `scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh`; golden frames TODO |
 | Rendering starts before analysis has finished | No lookahead, no global normalization — the two-pass design silently becomes one pass | Integration | `progress_reports_the_three_phases_in_order_with_a_frame_total` |
 | Visuals do not react to the audio at all | The one thing avz exists for, and a static video still looks like a successful render | Integration (pixels) | `the_rendered_brightness_visibly_follows_the_loudness_of_the_song` |
+| The assembled binary writes an mp4 no player will open: a stream missing, a frame short, the wrong length | Every seam passes its own tests and the one artifact avz exists to produce is broken | Integration in CI (ffprobe, through the binary) | `a_two_second_software_render_is_a_playable_mp4_with_one_video_and_one_audio_stream` |
 | `--sample` renders the wrong frames | The picture runs against the wrong second of the song, for the whole excerpt | Unit + integration | `a_sample_range_selects_the_frames_that_cover_it`, `a_sample_boundary_lands_on_the_frame_whose_timestamp_it_names`, `a_sampled_render_writes_exactly_the_frames_of_the_requested_range` |
 | `--sample` picture and muxed audio start at different instants | Sound sits a fraction of a second off the visuals for the whole excerpt | Unit + integration (bitstream compare) | `the_audio_starts_at_the_first_rendered_frames_timestamp`, `a_sampled_render_seeks_the_audio_input_and_still_copies_the_stream`, `a_sampled_render_muxes_the_matching_slice_of_the_original_audio` |
 | A sample the song cannot satisfy reaches ffmpeg as an empty video | A cryptic encoder failure, or a zero-frame mp4 | Unit + integration | `a_sample_that_starts_after_the_song_ends_is_a_config_error`, `a_sample_shorter_than_one_frame_is_a_config_error`, `render_of_a_sample_past_the_end_of_the_song_exits_2` |
