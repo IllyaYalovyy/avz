@@ -3,15 +3,16 @@
 //! One [`FeatureFrame`] per video frame, so the renderer can index features by
 //! `frame_index` and never has to resample anything. This module owns frame
 //! timing and window placement; the FFT and the pure functions that read
-//! features off a magnitude spectrum live in [`super::spectrum`], and the
-//! flux-to-onset detector in [`super::onset`]. The envelope and normalization
-//! passes arrive in RFC-001 Step 13 and slot into the same struct.
+//! features off a magnitude spectrum live in [`super::spectrum`], the
+//! flux-to-onset detector in [`super::onset`], and the global normalization and
+//! envelope followers in [`super::envelope`].
 
 use std::time::Duration;
 
 use rayon::prelude::*;
 
 use crate::analysis::DecodedAudio;
+use crate::analysis::envelope::{self, EnvelopeParams};
 use crate::analysis::onset::{self, OnsetParams};
 use crate::analysis::spectrum::{self, Spectrograph};
 use crate::{Error, Result};
@@ -25,27 +26,49 @@ const NOMINAL_WINDOW: usize = 2048;
 ///
 /// Fixed-size and `Copy` on purpose: the whole struct is uploaded as a uniform
 /// once per rendered frame (`VISION.md` §5.1).
+///
+/// Every field is in `0.0..=1.0`. The six spectral features and `rms` are
+/// rescaled against the song's own p5..p95 by [`envelope::normalize`], so a
+/// quiet folk record and a loud master both reach the top of the visual range;
+/// each is paired with an `_env` field carrying the attack/decay envelope of
+/// that same normalized track. Presets choose: the raw field to snap, the
+/// envelope to swell (`VISION.md` §6).
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct FeatureFrame {
-    /// Root mean square of the analysis window. Nominally `0.0..=1.0`.
+    /// Root mean square of the analysis window, normalized.
     pub rms: f32,
-    /// Log power, 20–150 Hz. Kick response.
+    /// [`Self::rms`], envelope-smoothed.
+    pub rms_env: f32,
+    /// Log power, 20–150 Hz, normalized. Kick response.
     pub bass: f32,
-    /// Log power, 150–500 Hz. Body and thickness.
+    /// [`Self::bass`], envelope-smoothed.
+    pub bass_env: f32,
+    /// Log power, 150–500 Hz, normalized. Body and thickness.
     pub low_mid: f32,
-    /// Log power, 500–2000 Hz. Detail motion, vocals-ish.
+    /// [`Self::low_mid`], envelope-smoothed.
+    pub low_mid_env: f32,
+    /// Log power, 500–2000 Hz, normalized. Detail motion, vocals-ish.
     pub mid: f32,
-    /// Log power, 2–8 kHz. Sparkle, cymbals.
+    /// [`Self::mid`], envelope-smoothed.
+    pub mid_env: f32,
+    /// Log power, 2–8 kHz, normalized. Sparkle, cymbals.
     pub high: f32,
-    /// Log power, 8–16 kHz. Fine grain, shimmer.
+    /// [`Self::high`], envelope-smoothed.
+    pub high_env: f32,
+    /// Log power, 8–16 kHz, normalized. Fine grain, shimmer.
     pub air: f32,
-    /// Positive spectral flux against the previous frame. Zero on frame 0.
+    /// [`Self::air`], envelope-smoothed.
+    pub air_env: f32,
+    /// Positive spectral flux against the previous frame, normalized. Zero on
+    /// frame 0. Onsets are detected on the *raw* flux, before this rescaling.
     pub flux: f32,
     /// A hit, decaying: exactly 1.0 on the frame an onset landed on, then
     /// falling exponentially toward zero (`VISION.md` §6). Decayed here rather
-    /// than in WGSL because a shader sees one frame at a time.
+    /// than in WGSL because a shader sees one frame at a time. Already an
+    /// impulse in `0.0..=1.0`, so it is the one feature the global pass leaves
+    /// alone.
     pub onset: f32,
-    /// Spectral centroid over Nyquist, `0.0..=1.0`. Zero for a silent window.
+    /// Spectral centroid over Nyquist, normalized. Zero for a silent window.
     pub centroid: f32,
 }
 
@@ -116,17 +139,51 @@ impl FeatureTimeline {
     }
 }
 
-/// Build a [`FeatureTimeline`] with one frame per video frame at `fps`.
+/// Build a [`FeatureTimeline`] with one frame per video frame at `fps`, with the
+/// default envelope.
+///
+/// # Errors
+///
+/// See [`analyze_with`].
+pub fn analyze(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
+    analyze_with(audio, fps, EnvelopeParams::default())
+}
+
+/// Build a [`FeatureTimeline`] with one frame per video frame at `fps`, smoothed
+/// by `envelope`.
 ///
 /// Each frame's analysis window is centered on that video frame's exact
 /// timestamp, computed from the frame index rather than accumulated hop by hop,
 /// so a sample rate that is not a whole multiple of `fps` (44.1 kHz at 24 fps,
 /// say) cannot drift the analysis away from the picture over a long song.
 ///
+/// The windows are transformed first, then the whole song's tracks are rescaled
+/// against their own p5..p95 and smoothed. That second pass reads every frame at
+/// once, which is precisely what the two-pass architecture exists to allow
+/// (`VISION.md` §4.2) — and why `--sample` still normalizes against the entire
+/// song rather than the excerpt.
+///
 /// # Errors
 ///
 /// [`Error::Analysis`] if `fps` is zero or the audio carries no samples.
-pub fn analyze(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
+pub fn analyze_with(
+    audio: &DecodedAudio,
+    fps: u32,
+    envelope: EnvelopeParams,
+) -> Result<FeatureTimeline> {
+    let mut timeline = raw_timeline(audio, fps)?;
+    rescale_and_smooth(&mut timeline.frames, fps, envelope);
+
+    Ok(timeline)
+}
+
+/// The windowed-FFT pass alone: every feature in its natural units, before the
+/// global normalization and envelope pass rescales them.
+///
+/// Separate from [`analyze_with`] because the DSP here answers to signals whose
+/// correct value is known analytically — a 60 Hz sine's bass energy, a click's
+/// flux — and those magnitudes are exactly what normalization then throws away.
+fn raw_timeline(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
     if fps == 0 {
         return Err(Error::Analysis("fps must be at least 1".to_owned()));
     }
@@ -171,10 +228,10 @@ pub fn analyze(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
                     high,
                     air,
                     // Flux compares neighbours, and onsets compare a second of
-                    // flux, so both are filled in below.
-                    flux: 0.0,
-                    onset: 0.0,
+                    // flux, so both are filled in below. The envelopes need the
+                    // whole song and are filled in by `rescale_and_smooth`.
                     centroid: spectrum::spectral_centroid(&magnitudes, bin_hz),
+                    ..FeatureFrame::default()
                 };
 
                 (frame, magnitudes)
@@ -206,6 +263,82 @@ pub fn analyze(audio: &DecodedAudio, fps: u32) -> Result<FeatureTimeline> {
     );
 
     Ok(FeatureTimeline { fps, frames })
+}
+
+/// Reads one feature off a frame.
+type ReadFeature = fn(&FeatureFrame) -> f32;
+
+/// Writes a normalized feature and its envelope back onto a frame.
+type WriteSmoothed = fn(&mut FeatureFrame, f32, f32);
+
+/// Writes a normalized feature back onto a frame, for the features that carry no
+/// envelope.
+type WriteBare = fn(&mut FeatureFrame, f32);
+
+/// Rescale every feature against the whole song and fill in the envelopes.
+///
+/// `onset` is left alone: it is already an impulse in `0.0..=1.0`, and stretching
+/// it to the song's own range would make a record with one weak hit flash as hard
+/// as one with a kick drum — and would break the exactly-1.0-on-a-hit invariant
+/// [`FeatureTimeline::is_onset`] reads.
+///
+/// `flux` and `centroid` are rescaled but not smoothed. Both are read as instants
+/// rather than as motion: `flux` is onset intensity, and an envelope on a hue
+/// shift would smear it across the beat.
+fn rescale_and_smooth(frames: &mut [FeatureFrame], fps: u32, envelope: EnvelopeParams) {
+    let smoothed: [(ReadFeature, WriteSmoothed); 6] = [
+        (
+            |frame| frame.rms,
+            |frame, value, env| (frame.rms, frame.rms_env) = (value, env),
+        ),
+        (
+            |frame| frame.bass,
+            |frame, value, env| (frame.bass, frame.bass_env) = (value, env),
+        ),
+        (
+            |frame| frame.low_mid,
+            |frame, value, env| (frame.low_mid, frame.low_mid_env) = (value, env),
+        ),
+        (
+            |frame| frame.mid,
+            |frame, value, env| (frame.mid, frame.mid_env) = (value, env),
+        ),
+        (
+            |frame| frame.high,
+            |frame, value, env| (frame.high, frame.high_env) = (value, env),
+        ),
+        (
+            |frame| frame.air,
+            |frame, value, env| (frame.air, frame.air_env) = (value, env),
+        ),
+    ];
+
+    for (read, write) in smoothed {
+        let mut track: Vec<f32> = frames.iter().map(read).collect();
+        envelope::normalize(&mut track);
+        let followed = envelope::follow(&track, fps, envelope);
+
+        for ((frame, &value), &env) in frames.iter_mut().zip(&track).zip(&followed) {
+            write(frame, value, env);
+        }
+    }
+
+    let bare: [(ReadFeature, WriteBare); 2] = [
+        (|frame| frame.flux, |frame, value| frame.flux = value),
+        (
+            |frame| frame.centroid,
+            |frame, value| frame.centroid = value,
+        ),
+    ];
+
+    for (read, write) in bare {
+        let mut track: Vec<f32> = frames.iter().map(read).collect();
+        envelope::normalize(&mut track);
+
+        for (frame, &value) in frames.iter_mut().zip(&track) {
+            write(frame, value);
+        }
+    }
 }
 
 /// Copy the analysis window centered on `center` into `buffer`, and return the
@@ -295,6 +428,21 @@ mod tests {
         }
     }
 
+    /// The timeline before the global pass, where every feature is still in the
+    /// units its DSP produced.
+    ///
+    /// The band, RMS, flux, and centroid tests below assert against signals whose
+    /// correct answer is known analytically — a 60 Hz sine's bass energy, a
+    /// click's flux — and `analyze` then rescales each of those tracks against
+    /// its own p5..p95, which is exactly the information those assertions need.
+    /// Worse, it rescales each feature *independently*, so "bass towers over mid"
+    /// is not a statement the normalized timeline can even make. The global pass
+    /// is a pure function of a whole track and is tested as one in
+    /// [`super::envelope`]; what remains here is the windowed FFT.
+    fn raw(samples: Vec<f32>, sample_rate: u32, fps: u32) -> FeatureTimeline {
+        raw_timeline(&audio(samples, sample_rate), fps).expect("the raw pass analyzes")
+    }
+
     /// `amplitude`-scaled sine of `freq` Hz, `seconds` long.
     fn sine(freq: f64, amplitude: f64, seconds: f64, sample_rate: u32) -> Vec<f32> {
         let count = (seconds * f64::from(sample_rate)) as usize;
@@ -348,13 +496,35 @@ mod tests {
             .collect()
     }
 
-    /// The five band energies of the middle frame of a `freq` Hz tone, in the
+    /// Every float a preset can read off one frame. Listed by hand so a new
+    /// field has to be added here too, rather than quietly escaping the
+    /// unit-interval and `NaN` assertions.
+    fn all_features(frame: &FeatureFrame) -> [f32; 15] {
+        [
+            frame.rms,
+            frame.rms_env,
+            frame.bass,
+            frame.bass_env,
+            frame.low_mid,
+            frame.low_mid_env,
+            frame.mid,
+            frame.mid_env,
+            frame.high,
+            frame.high_env,
+            frame.air,
+            frame.air_env,
+            frame.flux,
+            frame.onset,
+            frame.centroid,
+        ]
+    }
+
+    /// The five raw band energies of the middle frame of a `freq` Hz tone, in the
     /// band order of `VISION.md` §5.1: bass, low_mid, mid, high, air.
     ///
     /// The middle frame, because its window sits wholly inside the signal.
     fn bands_of_a_tone(freq: f64, sample_rate: u32) -> [f32; 5] {
-        let timeline = analyze(&audio(sine(freq, 0.9, 1.0, sample_rate), sample_rate), 30)
-            .expect("a sine analyzes");
+        let timeline = raw(sine(freq, 0.9, 1.0, sample_rate), sample_rate, 30);
         let frame = timeline.frame(timeline.len() / 2);
 
         [frame.bass, frame.low_mid, frame.mid, frame.high, frame.air]
@@ -442,8 +612,7 @@ mod tests {
     #[test]
     fn a_constant_sine_has_the_same_rms_on_every_frame() {
         let amplitude = 0.8;
-        let timeline = analyze(&audio(sine(1_000.0, amplitude, 2.0, RATE), RATE), 30)
-            .expect("a sine analyzes");
+        let timeline = raw(sine(1_000.0, amplitude, 2.0, RATE), RATE, 30);
 
         let expected = (amplitude / f64::sqrt(2.0)) as f32;
         for (index, frame) in timeline.frames.iter().enumerate() {
@@ -459,7 +628,7 @@ mod tests {
     /// trigonometry.
     #[test]
     fn a_dc_signal_has_an_rms_equal_to_its_amplitude() {
-        let timeline = analyze(&audio(vec![0.5; RATE as usize], RATE), 30).expect("dc analyzes");
+        let timeline = raw(vec![0.5; RATE as usize], RATE, 30);
 
         for frame in &timeline.frames {
             assert!((frame.rms - 0.5).abs() < 1e-6, "rms {}", frame.rms);
@@ -478,7 +647,7 @@ mod tests {
     fn a_loud_passage_reads_louder_than_a_quiet_one() {
         let mut samples = sine(440.0, 0.1, 1.0, RATE);
         samples.extend(sine(440.0, 0.9, 1.0, RATE));
-        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let timeline = raw(samples, RATE, 30);
 
         let quiet = timeline.frame(15).rms;
         let loud = timeline.frame(45).rms;
@@ -522,7 +691,7 @@ mod tests {
             *sample += high;
         }
 
-        let timeline = analyze(&audio(samples, RATE), 30).expect("two tones analyze");
+        let timeline = raw(samples, RATE, 30);
         let frame = timeline.frame(15);
 
         for quiet in [frame.low_mid, frame.mid, frame.air] {
@@ -539,8 +708,7 @@ mod tests {
     /// the first frame has nothing to differ from.
     #[test]
     fn steady_tone_has_near_zero_flux() {
-        let timeline =
-            analyze(&audio(sine(1_000.0, 0.9, 2.0, RATE), RATE), 30).expect("a sine analyzes");
+        let timeline = raw(sine(1_000.0, 0.9, 2.0, RATE), RATE, 30);
 
         assert_eq!(
             timeline.frame(0).flux,
@@ -565,7 +733,7 @@ mod tests {
     fn tone_switch_spikes_flux_at_switch_frame() {
         let mut samples = sine(200.0, 0.9, 1.0, RATE);
         samples.extend(sine(4_000.0, 0.9, 1.0, RATE));
-        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let timeline = raw(samples, RATE, 30);
 
         // The switch is one second in: frame 30, whose window straddles it.
         let (spike_at, spike) = timeline
@@ -671,7 +839,10 @@ mod tests {
             click_at(&mut samples, at(beat, RATE), 0.1);
         }
 
-        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+        let timeline = analyze(&audio(samples.clone(), RATE), 30).expect("analyzes");
+        // The global threshold is a statement about the flux the detector saw,
+        // which is the raw track — `analyze` rescales `flux` afterwards.
+        let unscaled = raw(samples, RATE, 30);
 
         for beat in quiet {
             let frame = (beat * 30.0) as usize;
@@ -681,7 +852,7 @@ mod tests {
                 onset_frames(&timeline)
             );
             assert!(
-                timeline.frame(frame).flux < global_threshold(&timeline),
+                unscaled.frame(frame).flux < global_threshold(&unscaled),
                 "the quiet click at {beat}s clears a global threshold too, so \
                  this test would pass without an adaptive one"
             );
@@ -759,6 +930,141 @@ mod tests {
         assert!((timeline.frame(hit + 3).onset - 0.513).abs() < 0.01);
     }
 
+    /// The `onset` impulse is the one feature the global pass must not touch: it
+    /// is already an impulse, and `is_onset` reads a hit as exactly 1.0.
+    /// Normalizing it would move every hit off that value and silently empty the
+    /// binary train.
+    #[test]
+    fn the_onset_impulse_passes_through_the_global_normalization_unchanged() {
+        let mut samples = noise(3.0, 0.005, 29, RATE);
+        for beat in [0.5, 1.0, 1.5, 2.0] {
+            click_at(&mut samples, at(beat, RATE), 0.9);
+        }
+
+        let normalized = analyze(&audio(samples.clone(), RATE), 30).expect("analyzes");
+        let unscaled = raw(samples, RATE, 30);
+
+        let onsets: Vec<f32> = normalized.frames.iter().map(|f| f.onset).collect();
+        let expected: Vec<f32> = unscaled.frames.iter().map(|f| f.onset).collect();
+
+        assert_eq!(onsets, expected);
+        assert_eq!(onset_frames(&normalized).len(), 4);
+    }
+
+    /// The acceptance criterion of RFC-001 Step 13, on real decoded audio: every
+    /// field the shader reads is a unit-interval float, and none of them is a
+    /// `NaN` waiting to paint a frame black.
+    #[test]
+    fn every_feature_of_the_fixture_lands_in_the_unit_interval() {
+        let decoded = crate::analysis::decode(fixture("tone-tagged.mp3")).expect("fixture decodes");
+        let timeline = analyze(&decoded, 30).expect("the fixture analyzes");
+
+        for (index, frame) in timeline.frames.iter().enumerate() {
+            for value in all_features(frame) {
+                assert!(
+                    value.is_finite() && (0.0..=1.0).contains(&value),
+                    "frame {index} carries {value}: {frame:?}"
+                );
+            }
+        }
+    }
+
+    /// Why normalization exists (`VISION.md` §4.2): the same performance mastered
+    /// twenty decibels apart must drive the same motion. Without the global pass
+    /// the quiet master would render nearly black.
+    #[test]
+    fn a_quiet_master_and_a_loud_one_analyze_to_the_same_timeline() {
+        let shape = |gain: f32| {
+            let mut samples = sine(60.0, 0.9, 1.0, RATE);
+            samples.extend(sine(3_000.0, 0.3, 1.0, RATE));
+            samples.extend(sine(60.0, 0.5, 1.0, RATE));
+            samples.iter().map(|sample| sample * gain).collect()
+        };
+
+        let loud = analyze(&audio(shape(1.0), RATE), 30).expect("analyzes");
+        let quiet = analyze(&audio(shape(0.1), RATE), 30).expect("analyzes");
+
+        // The quiet master reads a tenth as loud before the global pass, which is
+        // the state of affairs this test exists to rule out.
+        let unscaled_loud = raw(shape(1.0), RATE, 30).frame(15).rms;
+        let unscaled_quiet = raw(shape(0.1), RATE, 30).frame(15).rms;
+        assert!(unscaled_quiet < unscaled_loud * 0.2, "the masters differ");
+
+        for index in 0..loud.len() {
+            let (loud, quiet) = (loud.frame(index), quiet.frame(index));
+            assert!(
+                (loud.rms - quiet.rms).abs() < 0.02 && (loud.rms_env - quiet.rms_env).abs() < 0.02,
+                "frame {index}: {loud:?} against {quiet:?}"
+            );
+        }
+    }
+
+    /// What the envelope is for: after a hit passes, the raw feature drops away
+    /// at once and the envelope lets go of it over a few hundred milliseconds.
+    /// A preset driven by the envelope moves musically; one driven by the raw
+    /// feature strobes.
+    #[test]
+    fn the_envelope_holds_a_feature_after_it_has_fallen_away() {
+        let mut samples = silence(2.0, RATE);
+        // A tenth of a second of full-scale bass, then nothing.
+        for (index, sample) in samples[at(0.5, RATE)..at(0.6, RATE)].iter_mut().enumerate() {
+            *sample = (TAU * 60.0 * index as f64 / f64::from(RATE)).sin() as f32 * 0.9;
+        }
+
+        let timeline = analyze(&audio(samples, RATE), 30).expect("analyzes");
+
+        // Three frames (100 ms) after the burst ends, the raw bass is back at the
+        // floor while the envelope still holds a good part of it.
+        let after = timeline.frame(21);
+        assert!(after.bass < 0.1, "the raw feature lingered: {after:?}");
+        assert!(
+            after.bass_env > 0.5,
+            "the envelope let go too fast: {after:?}"
+        );
+        // And it is still monotonically falling, never rising on its own.
+        for index in 22..timeline.len() {
+            assert!(
+                timeline.frame(index).bass_env <= timeline.frame(index - 1).bass_env,
+                "the envelope grew again at frame {index}"
+            );
+        }
+    }
+
+    /// `visual.smoothing` is the global envelope decay scale (`VISION.md` §5.5),
+    /// and `analyze_with` is the only way it reaches the DSP.
+    #[test]
+    fn a_larger_smoothing_holds_every_envelope_longer() {
+        let mut samples = silence(2.0, RATE);
+        for (index, sample) in samples[..at(0.5, RATE)].iter_mut().enumerate() {
+            *sample = (TAU * 60.0 * index as f64 / f64::from(RATE)).sin() as f32 * 0.9;
+        }
+        let audio = audio(samples, RATE);
+
+        let nominal = analyze_with(
+            &audio,
+            30,
+            EnvelopeParams::for_smoothing(envelope::NOMINAL_SMOOTHING),
+        )
+        .expect("analyzes");
+        let smoother = analyze_with(
+            &audio,
+            30,
+            EnvelopeParams::for_smoothing(2.0 * envelope::NOMINAL_SMOOTHING),
+        )
+        .expect("analyzes");
+
+        // Well after the tone stops, the smoother render still holds more of it.
+        let (nominal, smoother) = (nominal.frame(20), smoother.frame(20));
+        assert!(
+            smoother.bass_env > nominal.bass_env * 1.2,
+            "smoothing did not slow the decay: {smoother:?} against {nominal:?}"
+        );
+        assert_eq!(
+            smoother.bass, nominal.bass,
+            "smoothing must not touch the raw feature"
+        );
+    }
+
     /// Analysis finishes before rendering starts, so a preset can read ahead of
     /// the frame it is drawing and start moving *into* an onset (`VISION.md`
     /// §4.2). Reading past the end clamps rather than panics.
@@ -785,9 +1091,8 @@ mod tests {
     #[test]
     fn centroid_higher_for_higher_tone() {
         for rate in [44_100, 48_000] {
-            let dark = analyze(&audio(sine(200.0, 0.9, 1.0, rate), rate), 30).expect("analyzes");
-            let bright =
-                analyze(&audio(sine(8_000.0, 0.9, 1.0, rate), rate), 30).expect("analyzes");
+            let dark = raw(sine(200.0, 0.9, 1.0, rate), rate, 30);
+            let bright = raw(sine(8_000.0, 0.9, 1.0, rate), rate, 30);
 
             let dark = dark.frame(15).centroid;
             let bright = bright.frame(15).centroid;
@@ -812,22 +1117,15 @@ mod tests {
         }
     }
 
+    /// The risk-matrix row: a silent song has a zero p5..p95 spread in every
+    /// feature, and dividing by it would put a `NaN` in a uniform and paint the
+    /// frame black. Every field, envelopes included.
     #[test]
     fn silence_has_no_nans_in_any_feature() {
         let timeline = analyze(&audio(silence(1.0, RATE), RATE), 30).expect("silence analyzes");
 
         for frame in &timeline.frames {
-            for value in [
-                frame.rms,
-                frame.bass,
-                frame.low_mid,
-                frame.mid,
-                frame.high,
-                frame.air,
-                frame.flux,
-                frame.onset,
-                frame.centroid,
-            ] {
+            for value in all_features(frame) {
                 assert!(value.is_finite(), "{frame:?}");
                 assert_eq!(value, 0.0, "silence is not silent: {frame:?}");
             }
@@ -855,8 +1153,7 @@ mod tests {
     /// onset the music never played.
     #[test]
     fn the_first_and_last_frames_read_as_loud_as_the_middle_of_the_song() {
-        let timeline =
-            analyze(&audio(sine(60.0, 0.9, 1.0, RATE), RATE), 30).expect("a sine analyzes");
+        let timeline = raw(sine(60.0, 0.9, 1.0, RATE), RATE, 30);
 
         let middle = timeline.frame(15).bass;
         let first = timeline.frame(0).bass;
@@ -875,8 +1172,7 @@ mod tests {
     /// on a short slice.
     #[test]
     fn a_song_shorter_than_one_window_still_analyzes() {
-        let timeline =
-            analyze(&audio(sine(1_000.0, 0.9, 0.01, RATE), RATE), 30).expect("a short song");
+        let timeline = raw(sine(1_000.0, 0.9, 0.01, RATE), RATE, 30);
 
         assert!(!timeline.is_empty());
         assert!(
@@ -897,7 +1193,7 @@ mod tests {
         // and outside a 2048-sample window around either.
         samples[5_000..5_064].fill(1.0);
 
-        let timeline = analyze(&audio(samples, RATE), 5).expect("analyzes");
+        let timeline = raw(samples, RATE, 5);
 
         assert!(
             timeline.frames.iter().any(|f| f.rms > 0.0),
@@ -919,7 +1215,7 @@ mod tests {
 
         let mut samples = silence(3.0, RATE);
         samples[burst..burst + 64].fill(1.0);
-        let timeline = analyze(&audio(samples, RATE), fps).expect("analyzes");
+        let timeline = raw(samples, RATE, fps);
 
         let loud: Vec<usize> = timeline
             .frames
@@ -981,12 +1277,13 @@ mod tests {
         let decoded = crate::analysis::decode(fixture("tone-tagged.mp3")).expect("fixture decodes");
 
         let timeline = analyze(&decoded, 30).expect("the fixture analyzes");
+        let unscaled = raw_timeline(&decoded, 30).expect("the fixture analyzes");
 
         assert_eq!(timeline.len(), 150);
         assert!(timeline.frames.iter().all(|f| f.rms.is_finite()));
         assert!(timeline.frames.iter().all(|f| (0.0..=1.0).contains(&f.rms)));
         assert!(
-            timeline.frames.iter().all(|f| f.rms > 0.01),
+            unscaled.frames.iter().all(|f| f.rms > 0.01),
             "the fixture is never silent"
         );
     }
@@ -1002,7 +1299,7 @@ mod tests {
     #[test]
     fn the_fixtures_kick_separates_from_its_tone_and_spikes_flux_on_the_beat() {
         let decoded = crate::analysis::decode(fixture("tone-tagged.mp3")).expect("fixture decodes");
-        let timeline = analyze(&decoded, 30).expect("the fixture analyzes");
+        let timeline = raw_timeline(&decoded, 30).expect("the fixture analyzes");
 
         // At 30 fps a kick every half second lands on every 15th frame.
         let kicks = (15..timeline.len()).step_by(15);

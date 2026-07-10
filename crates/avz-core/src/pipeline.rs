@@ -11,7 +11,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::analysis::{self, FeatureFrame};
+use crate::analysis::{self, EnvelopeParams, FeatureFrame};
 use crate::config::{Config, SampleRange};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::render::{AdapterChoice, AdapterKind, Gpu, Offscreen};
@@ -80,7 +80,11 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
 
     progress.phase_started(Phase::Analyzing, None);
     let audio = analysis::decode(request.input)?;
-    let timeline = analysis::analyze(&audio, fps)?;
+    // The whole song, never the `--sample` excerpt: the p5/p95 normalization is
+    // global by definition, so an excerpt must look the way it does in the render
+    // it previews.
+    let envelope = EnvelopeParams::for_smoothing(config.visual.smoothing);
+    let timeline = analysis::analyze_with(&audio, fps, envelope)?;
     let range = frame_range(timeline.len(), fps, request.sample)?;
     progress.phase_finished(Phase::Analyzing);
 
@@ -137,9 +141,9 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
 /// The M1 tracer bullet's entire visualizer: brightness follows loudness.
 ///
 /// Returned in linear space, because the render target is sRGB and encodes on
-/// write. `rms` is used raw — normalization against the song's own dynamic range
-/// arrives with RFC-001 Step 13, and a gain invented here would only have to be
-/// removed then.
+/// write. `rms` already spans the song's own dynamic range, so no gain is
+/// invented here; the clamp guards a caller handing over a frame this pipeline
+/// did not analyze.
 fn tracer_color(frame: FeatureFrame) -> [f32; 4] {
     let level = frame.rms.clamp(0.0, 1.0);
     [level, level, level, 1.0]
@@ -260,8 +264,8 @@ mod tests {
         }
     }
 
-    /// mp3 decodes a hair outside `-1.0..=1.0`, and RMS is not yet normalized, so
-    /// a level above one is reachable. It must clamp, not wrap or wash out.
+    /// `analyze` normalizes `rms` into `0.0..=1.0`, but `tracer_color` takes any
+    /// `FeatureFrame`. A hotter one must clamp, not wrap or wash out.
     #[test]
     fn a_frame_hotter_than_full_scale_clamps_to_opaque_white() {
         assert_eq!(tracer_color(frame(1.4)), [1.0, 1.0, 1.0, 1.0]);

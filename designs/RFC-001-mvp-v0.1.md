@@ -175,6 +175,47 @@ specific to this RFC:
   impulse is decayed into `FeatureFrame.onset` from a time constant, so a hit
   fades over the same 150 ms at every `fps`. The binary train stays available
   through `onset::detect` and `FeatureTimeline::is_onset`.
+- **Normalization runs before the envelopes** (decided in Step 13). VISION §5.1
+  lists envelopes first, but the follower is positively homogeneous — every step
+  is a convex combination of its input and its own last value — while
+  normalization is affine *and clamped*. Smoothing first and clamping second
+  would let a decayed tail sit above 1.0, and would make the attack and decay
+  time constants mean something different on every master. Normalizing first also
+  means the follower's output needs no clamp of its own: it cannot leave the range
+  of its input.
+- **The onset impulse is the one feature the global pass leaves alone** (decided
+  in Step 13). VISION §5.1 says every feature is normalized 0..1 by a global
+  pass, but `onset` already *is* an impulse in 0..1. Stretching it to the song's
+  own p5..p95 would make a record with one weak hit flash as hard as one with a
+  kick drum, and would move every hit off the exactly-1.0 value that lets
+  `FeatureTimeline::is_onset` recover the binary train from the impulse. `flux`
+  and `centroid` are normalized but not enveloped: both are read as instants — flux
+  is onset intensity, and an envelope on a hue shift smears it across the beat —
+  and VISION §6's `Globals` gives an `_env` to exactly the six energy features.
+  Onsets are detected on the *raw* flux, before it is rescaled, so the absolute
+  noise floor above keeps the scale it was measured against.
+- **A degenerate p5..p95 spread normalizes to zeros** (decided in Step 13).
+  Digital silence, a held chord, and a constant all have no dynamic range worth
+  mapping. Dividing by their spread is a division by zero at best and, where the
+  spread is merely tiny, amplifies the FFT's own numerical noise into full-scale
+  flicker. Below `envelope::NORMALIZE_EPSILON` the track becomes all zeros —
+  which is also what keeps a `NaN` out of a uniform on a silent intro.
+- **`visual.smoothing` scales the decay time constant, not the attack** (decided
+  in Step 13). VISION §5.5 calls it the "global envelope decay scale" and
+  defaults it to 0.35, and §5.1 wants a default decay of 200–400 ms. The two are
+  reconciled by making the decay scale linearly with `smoothing`, anchored so
+  that `smoothing = 0.35` gives exactly the 300 ms default: no change to the
+  config schema, which already validates `smoothing` into `0..=1`, and
+  `smoothing = 0` degenerates to an envelope that tracks its feature exactly. The
+  attack is deliberately not scaled — smoothing is what happens *after* a hit,
+  and slowing the rise would move the hit off the beat, which is the one thing
+  VISION §4.2 spends the two-pass architecture to avoid. Per-preset overrides
+  arrive with the schemas in Step 15.
+- **Normalization is global over the song, never over a `--sample` excerpt**
+  (decided in Step 13). `analysis::analyze_with` never sees the sample range;
+  `pipeline::render` analyzes the whole song and only then computes its frame
+  range. A preview therefore shows the seconds it previews exactly as the full
+  render will, which is the entire point of `--sample`.
 - **Remote CI is advisory** (owner decision, 2026-07-09). The local
   `./scripts/quality.sh` gate — tests plus the invariant hooks in
   `scripts/quality.d/` — is the authority for "done". The workflow Step 10
@@ -251,7 +292,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 - [x] **Step 11** - Full FFT features: bands, flux, centroid *(prerequisite: Step 6)*
 - [x] **Step 12** - Onset detection: adaptive median+MAD threshold *(prerequisite: Step 11)*
-- [ ] **Step 13** - Envelope followers + two-pass normalization *(prerequisite: Step 11)*
+- [x] **Step 13** - Envelope followers + two-pass normalization *(prerequisite: Step 11)*
 - [ ] **Step 14** - `pulse` preset on the full Globals uniform contract + golden-frame
   harness; manual envelope-tuning pass *(prerequisite: Steps 9, 12, 13)*
 
