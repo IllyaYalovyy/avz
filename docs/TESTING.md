@@ -249,6 +249,19 @@ renders at the 720p `--sample` default, because no CLI flag reaches
 `output.resolution` until the preset system lands (RFC-001 Step 15). CI installs
 `ffmpeg` and `mesa-vulkan-drivers` for it; a GPU is never involved.
 
+**The batch loop.** `an_album_batch_renders_every_song_to_its_own_mp4_unattended`
+renders three songs from one directory the way `for f in album/*.mp3` does. It is
+not a third rendering test: what it pins is the *shape* of a render seen from a
+shell — that the default output path is derived from each input rather than
+shared, so two tracks do not overwrite each other, that every iteration exits 0,
+and that no `.part` survives. A default `--out` that collided would pass every
+single-song test in this suite and destroy an album on the first run.
+
+The rest of UT-010 is `scripts/album-acceptance.sh`, which renders a real album at
+full resolution and fails on the first intervention. Minutes of encoding is not a
+per-commit gate, so it is a release-checklist step (`docs/RELEASE.md`) rather than
+a `scripts/quality.d/` hook.
+
 **Proving `-c:a copy`.** An audio codec of `mp3` in the output does *not* prove
 the stream was copied: re-encoding an mp3 with `libmp3lame` also reports
 `codec_name=mp3`, so a codec assertion passes straight through a generation of
@@ -421,7 +434,11 @@ exists, or `TODO` / `manual` with a reason.
 | A golden test renders on a hardware adapter | The committed hashes are a hash of one laptop; the test fails everywhere else for reasons that look like shader bugs | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |
 | A preset ships with no golden hashes | The one thing that catches shader drift does not cover the new preset | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |
 | `--sample` previews pixels the full render will not draw | The preview is a different video from the one that ships; the preset's clock is the excerpt's, not the song's | Integration (pixels) | `a_sampled_render_writes_exactly_the_frames_of_the_requested_range` |
-| A typo'd `visual.preset` renders something, or fails late | A five-minute decode before a one-word error | Unit + integration | `an_unknown_preset_is_a_config_error_that_names_the_known_ones`, `an_unknown_preset_fails_before_the_song_is_even_decoded` |
+| A typo'd `visual.preset` renders something, or fails late | A five-minute decode before a one-word error | Unit + integration | `an_unknown_preset_is_a_config_error_that_names_the_known_ones`, `an_unknown_preset_fails_before_the_song_is_even_decoded`, `render_with_an_unknown_preset_exits_2_and_names_the_known_ones` |
+| `--preset` parses and never reaches the config layer | Every render draws `pulse`; the flag VISION §3 opens with is decoration | Unit + CLI | `the_preset_flag_reaches_the_cli_config_layer`, `preset_names_the_visualizer_to_render`, `render_with_an_unknown_preset_exits_2_and_names_the_known_ones` (which a silently dropped flag turns green→red by *succeeding*) |
+| Two songs in a directory render to one output path | A batch loop overwrites every track with the last one, silently | Integration (through the binary) | `an_album_batch_renders_every_song_to_its_own_mp4_unattended` |
+| A batch loop needs a human: a prompt, a retry, a leftover `.part` | The v0.1 acceptance criterion (VISION §9 M5) fails, and only on a real album | Integration + release script | `an_album_batch_renders_every_song_to_its_own_mp4_unattended`; `scripts/album-acceptance.sh` per release |
+| A preset's `perf_hint` promises a speedup it does not deliver | The one tuning advice avz gives for software rendering sends the user to the wrong knob | Manual (measured per release) | manual — `docs/RELEASE.md`; the v0.1 measurement is recorded in RFC-001 Step 23 |
 | Rendering starts before analysis has finished | No lookahead, no global normalization — the two-pass design silently becomes one pass | Integration | `progress_reports_the_three_phases_in_order_with_a_frame_total` |
 | Visuals do not react to the audio at all | The one thing avz exists for, and a static video still looks like a successful render | Integration (pixels) | `the_rendered_brightness_visibly_follows_the_loudness_of_the_song` |
 | The assembled binary writes an mp4 no player will open: a stream missing, a frame short, the wrong length | Every seam passes its own tests and the one artifact avz exists to produce is broken | Integration in CI (ffprobe, through the binary) | `a_two_second_software_render_is_a_playable_mp4_with_one_video_and_one_audio_stream` |

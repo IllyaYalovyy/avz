@@ -472,6 +472,39 @@ fn render_with_a_missing_background_image_exits_3_and_names_the_path() {
     );
 }
 
+/// `--preset` outranks a config file that named another one (`VISION.md` §5.5),
+/// and a typo'd one is the user's argument: exit 2, name the typo, and list what
+/// avz ships — before the song is decoded. The fake ffmpeg would have died on the
+/// first frame, so reaching the render at all is visible here as a failure.
+#[test]
+fn render_with_an_unknown_preset_exits_2_and_names_the_known_ones() {
+    let path = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let out = dir.path().join("out.mp4");
+    let config = dir.path().join("avz.toml");
+    fs::write(&config, "[visual]\npreset = \"pulse\"\n").expect("write a config naming a preset");
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--out")
+        .arg(&out)
+        .arg("--config")
+        .arg(&config)
+        .args(["--preset", "nebulla"])
+        .assert()
+        .code(2)
+        .stderr(contains("unknown preset `nebulla`"))
+        .stderr(contains("pulse"))
+        .stderr(contains("nebula"));
+
+    assert!(
+        !out.exists(),
+        "a rejected preset must not leave a render behind"
+    );
+}
+
 /// A typo'd `--palette` is the user's argument: exit 2, name the typo, and list
 /// every palette that does exist — before the song is decoded.
 #[test]

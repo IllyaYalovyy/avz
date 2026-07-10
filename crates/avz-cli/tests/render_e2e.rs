@@ -170,6 +170,69 @@ fn the_example_config_renders_a_playable_mp4() {
     );
 }
 
+/// UT-010 (`designs/USER-TASKS.md`), the v0.1 acceptance test, in miniature:
+///
+/// ```bash
+/// for f in album/*.mp3; do avz render "$f" --config album.toml; done
+/// ```
+///
+/// The loop is the batch story avz ships instead of a `batch` subcommand
+/// (`VISION.md` §3), and what makes it work is not one render but the *shape* of
+/// a render: each song writes to `<stem>.mp4` beside itself and nowhere else, so
+/// two tracks in a directory do not overwrite each other, and every iteration
+/// exits 0 so `||` never fires. A default `--out` that collided, or a render that
+/// left a `.part` behind, would pass every single-song test in the suite.
+///
+/// The full acceptance run is a real album under `scripts/album-acceptance.sh`;
+/// this is the part of it that can live in the gate.
+#[test]
+fn an_album_batch_renders_every_song_to_its_own_mp4_unattended() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let album = dir.path().join("album");
+    fs::create_dir(&album).expect("mkdir album");
+
+    let tracks = ["01-opener.mp3", "02-interlude.mp3", "03-closer.mp3"];
+    for track in tracks {
+        fs::copy(fixture("tone-tagged.mp3"), album.join(track)).expect("copy the fixture");
+    }
+
+    let config = dir.path().join("album.toml");
+    fs::write(&config, "[output]\nresolution = \"320x180\"\n").expect("write album.toml");
+
+    for track in tracks {
+        Command::cargo_bin("avz")
+            .expect("avz binary builds")
+            .arg("render")
+            .arg(album.join(track))
+            .arg("--config")
+            .arg(&config)
+            .args(["--sample", SAMPLE, "--adapter", "software"])
+            .assert()
+            .success();
+    }
+
+    for track in tracks {
+        let output = album.join(track).with_extension("mp4");
+        assert!(
+            output.is_file(),
+            "`{}` rendered no mp4 of its own",
+            output.display(),
+        );
+        assert_eq!(stream(&output, "v", "codec_name"), "h264");
+        assert_eq!(stream(&output, "a", "codec_name"), "mp3");
+    }
+
+    let leftovers: Vec<_> = fs::read_dir(&album)
+        .expect("read the album directory")
+        .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+        .filter(|name| name.to_string_lossy().ends_with(".part"))
+        .collect();
+    assert!(
+        leftovers.is_empty(),
+        "an unattended batch left half-written files behind: {leftovers:?}",
+    );
+}
+
 /// Ask `ffprobe` for one entry of every `kind` (`v` or `a`) stream.
 fn stream(file: &Path, kind: &str, entry: &str) -> String {
     ffprobe(file, &["-select_streams", kind], &format!("stream={entry}"))

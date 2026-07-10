@@ -61,6 +61,14 @@ pub struct RenderArgs {
     #[arg(long, value_name = "RANGE")]
     pub sample: Option<SampleRange>,
 
+    /// Which visualizer to render: `avz presets` lists the names.
+    ///
+    /// Not validated by clap — the preset registry is what knows which names
+    /// exist, and an unknown one fails with the list of those that do, before
+    /// the song is decoded.
+    #[arg(long, value_name = "NAME")]
+    pub preset: Option<String>,
+
     /// The color scheme: a built-in name, or two to eight inline hex colors.
     ///
     /// `--palette glacier` names one avz ships; `--palette '#1a1a2e,#e94560'`
@@ -235,6 +243,24 @@ mod tests {
             .expect_err("a range must run forwards");
 
         assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
+    }
+
+    /// `--preset nebula` is the flag `VISION.md` §3 opens its typical invocation
+    /// with. The name is not checked here: the registry is what knows which
+    /// presets exist, and `render` is where it says so with the list.
+    #[test]
+    fn preset_names_the_visualizer_to_render() {
+        assert_eq!(
+            render_args(&["--preset", "nebula"]).preset.as_deref(),
+            Some("nebula"),
+        );
+    }
+
+    /// A bare render leaves the preset to the config file and the built-in
+    /// default, the way `--palette` leaves the colors.
+    #[test]
+    fn a_bare_render_has_no_opinion_about_the_preset() {
+        assert!(render_args(&[]).preset.is_none());
     }
 
     /// Both spellings of `--palette` from `VISION.md` §3: a built-in name, and

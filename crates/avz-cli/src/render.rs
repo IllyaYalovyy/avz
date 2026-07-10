@@ -119,6 +119,7 @@ fn cli_layer(args: &RenderArgs) -> ConfigLayer {
             ..OutputLayer::default()
         },
         visual: VisualLayer {
+            preset: args.preset.clone(),
             palette: args.palette.clone(),
             seed: args.seed,
             ..VisualLayer::default()
@@ -190,6 +191,16 @@ mod tests {
             crate::cli::Command::Render(args) => args,
             other => panic!("expected a render command, got {other:?}"),
         }
+    }
+
+    /// `--preset nebula` is the first flag of `VISION.md` §3's typical
+    /// invocation. Without this it parses, names a real preset, and is silently
+    /// dropped — every render would draw `pulse`.
+    #[test]
+    fn the_preset_flag_reaches_the_cli_config_layer() {
+        let layer = cli_layer(&render_args(&["--preset", "nebula"]));
+
+        assert_eq!(layer.visual.preset.as_deref(), Some("nebula"));
     }
 
     /// The flag reaches the layer that outranks `--set` and `--config`. Without

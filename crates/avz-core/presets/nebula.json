@@ -1,6 +1,6 @@
 {
   "needs_feedback": true,
-  "perf_hint": "on software rendering, `octaves = 2` roughly halves the frame time; preview with `--sample 10s` first",
+  "perf_hint": "on software rendering, frame time scales with pixel count — preview with `--sample 10s` before committing to 1080p; `octaves = 2` then trims about a further 15%",
   "params": [
     {
       "name": "flow_scale",

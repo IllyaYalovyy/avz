@@ -17,14 +17,20 @@ See [VISION.md](VISION.md) for the full design: architecture, module breakdown,
 preset system, milestones, and backlog. VISION.md is the north star; a feature
 request that does not serve it goes to the backlog.
 
-**Status:** M2 landed, and M3 is under way. `avz render song.mp3` runs the whole
-pipeline — decode, full FFT analysis with envelopes and onsets, the `pulse`
-preset on the GPU, ffmpeg encode with the original audio muxed untouched — and
-`avz probe` reports tags. `avz presets` lists what ships and prints a preset's
-parameter schema; `--config`, `--set`, `--palette`, `--bg`, `--seed`, `--codec`,
-`--quality`, and the text-card flags configure it, and `avz config --example`
-writes a documented template of every one of them. `--preset` below is not a flag
-yet.
+**Status:** v0.1. The whole pipeline runs: decode, full FFT analysis with
+envelopes and onsets, a preset on the GPU, a background image and a title card
+composited over it, ffmpeg encode with the original audio muxed untouched. Two
+presets ship — `pulse` and `nebula` — selected with `--preset`. See
+[CHANGELOG.md](CHANGELOG.md) for what landed and what is deliberately absent
+(four more presets, the looped background video, and every codec but x264).
+
+**Presets.** `avz presets` lists them; `avz presets <name>` prints the
+parameters, their defaults and ranges, and any note about software rendering:
+
+```bash
+avz render song.mp3 --preset nebula
+avz render song.mp3 --preset nebula --set nebula.trail_decay=0.94
+```
 
 **Palettes.** `--palette` takes a built-in name — `ember`, `glacier`, `verdant`,
 `mono`, or `carpathian` — or two to eight inline hex colors, which avz resamples
@@ -83,6 +89,40 @@ same picture at different scales. `text.position` is the nine-grid from
 Target platform is Linux (Fedora primary). Windows and macOS are not tested or
 CI'd in v1.
 
+## Install
+
+```bash
+git clone https://github.com/IllyaYalovyy/avz && cd avz
+cargo install --path crates/avz-cli
+avz --version
+```
+
+That puts `avz` in `~/.cargo/bin`. Nothing else is vendored or downloaded at
+runtime: the presets, their schemas, and the text-card font are compiled into the
+binary, and `ffmpeg` is looked up on `PATH` before a render does any work.
+
+## Performance
+
+Rendering is offline, so slow is inconvenient rather than fatal. Both halves of
+the pipeline matter: the shader draws frames and x264 encodes them, concurrently,
+and a render moves at the speed of whichever is slower. On a busy preset the GPU
+is the floor; on `pulse` at 1080p it is usually x264 `-preset slow`.
+
+Measured on one machine — Radeon RX 6600M, 16-thread CPU, Mesa 25.3.6 — rendering
+a 60-second song at 1080p30, wall clock end to end:
+
+| Preset | `--adapter gpu` | `--adapter software` (lavapipe) |
+|---|---|---|
+| `pulse` | 33 s | 49 s |
+| `nebula` | 53 s | 83 s |
+
+Extrapolated to a 5-minute song: roughly 3–5 minutes on a GPU, and 4–7 on this
+CPU's software rasterizer. Treat the lavapipe column as a property of the CPU,
+not of avz — a two-core box will be several times slower, which is the 5–15 fps
+the fallback warning quotes. Two levers when a preview is what you want:
+`--sample 0:45..1:45` renders an excerpt at 720p, and frame time falls with pixel
+count.
+
 ## Usage
 
 The CLI is the UX. These invocations are the contract (see VISION.md §3):
@@ -96,7 +136,7 @@ avz render song.mp3 --preset nebula --palette ember \
       --bg art/forest.png --out video.mp4
 
 # Fast iteration on a chorus, low-res
-avz render song.mp3 --preset ribbons --sample 0:45..1:45
+avz render song.mp3 --preset nebula --sample 0:45..1:45
 
 # Pick the adapter: auto (default), gpu (fail without one), software (lavapipe)
 avz render song.mp3 --adapter software
@@ -137,6 +177,13 @@ preset defaults > built-in defaults. `--sample` contributes one default of its
 own — a reduced 720p resolution — which ranks just above preset defaults, so a
 config file or a flag still wins.
 
+Each render writes to `<song-stem>.mp4` beside its input and exits 0, so the
+batch loop above needs nothing from avz but its exit code: 2 means the arguments
+or the config are wrong and every remaining track will fail the same way, 3 means
+*this* song is unreadable, and 4 means the render or the encode failed. Nothing
+appears at the output path until ffmpeg has exited cleanly, so an interrupted
+batch leaves no half-written mp4 to mistake for a finished one.
+
 ## Project Workflow
 
 The default workflow is intentionally simple:
@@ -163,6 +210,7 @@ task-runner files, prompts, context files, and chat logs from being committed:
 ├── VISION.md                    # Product and architecture north star
 ├── AGENTS.md                    # Instructions for AI coding agents
 ├── CONTRIBUTING.md              # Contributor rules and quality bar
+├── CHANGELOG.md                 # What each release changed
 ├── Cargo.toml                   # Cargo workspace
 ├── crates/
 │   ├── avz-core/                # library: analysis / meta / render / encode /
@@ -171,6 +219,7 @@ task-runner files, prompts, context files, and chat logs from being committed:
 │   └── avz-cli/                 # thin binary `avz`: clap → avz-core calls
 ├── designs/
 │   ├── RFC-000-template.md      # Design proposal template
+│   ├── RFC-001-mvp-v0.1.md      # The v0.1 development plan
 │   └── USER-TASKS.md            # User workflow inventory
 ├── docs/
 │   ├── PROCESS.md               # How work moves from idea to merge
@@ -182,7 +231,9 @@ task-runner files, prompts, context files, and chat logs from being committed:
 │   ├── RELEASE.md               # Release checklist
 │   └── prompts/                 # Copy-ready AI prompts for common workflows
 ├── scripts/
+│   ├── album-acceptance.sh      # Batch-render an album unattended (UT-010)
 │   ├── install-git-hooks.sh     # Local AI-file pre-commit guard
+│   ├── make-test-fixture.sh     # Regenerate the CC0 mp3 fixtures
 │   ├── quality.sh               # Local quality gate
 │   └── quality.d/               # Project-specific quality checks
 └── .github/workflows/quality.yml
