@@ -139,6 +139,17 @@ specific to this RFC:
   `start_frame / fps`, not the seconds the user typed, which may fall between two
   frames. It reaches ffmpeg as an `-ss` in front of the mp3 input, which seeks
   and still copies: `-c:a copy` is never traded away for a sampled render.
+- **Analysis windows slide inward at the song's edges** (decided in Step 11).
+  Step 6 fixed each window's center on its video frame's timestamp, which leaves
+  the first and last windows hanging half off the song. Zero-padding the missing
+  half is the textbook answer, but it reads about 3 dB quiet across every band,
+  and the fill from one padded window into the next full one is a spectral
+  increase indistinguishable from an onset — the visuals would flash on a song
+  that opens on a held chord. The windows within half a window of either end
+  therefore slide inward to stay full, which costs at most 23 ms of timing error
+  on those frames and keeps the promise `rms` already made in Step 6: a song does
+  not fade in and out at its edges. A song shorter than one window has nothing to
+  slide toward and is zero-padded.
 - **Remote CI is advisory** (owner decision, 2026-07-09). The local
   `./scripts/quality.sh` gate — tests plus the invariant hooks in
   `scripts/quality.d/` — is the authority for "done". The workflow Step 10
@@ -213,7 +224,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 **M2 — Real analysis + envelope tuning** *(accept: `pulse` distinguishes kick/vocals/cymbals; onsets on-beat)*
 
-- [ ] **Step 11** - Full FFT features: bands, flux, centroid *(prerequisite: Step 6)*
+- [x] **Step 11** - Full FFT features: bands, flux, centroid *(prerequisite: Step 6)*
 - [ ] **Step 12** - Onset detection: adaptive median+MAD threshold *(prerequisite: Step 11)*
 - [ ] **Step 13** - Envelope followers + two-pass normalization *(prerequisite: Step 11)*
 - [ ] **Step 14** - `pulse` preset on the full Globals uniform contract + golden-frame

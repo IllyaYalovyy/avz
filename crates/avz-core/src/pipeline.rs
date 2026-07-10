@@ -234,7 +234,10 @@ mod tests {
     }
 
     fn frame(rms: f32) -> FeatureFrame {
-        FeatureFrame { rms }
+        FeatureFrame {
+            rms,
+            ..FeatureFrame::default()
+        }
     }
 
     #[test]
