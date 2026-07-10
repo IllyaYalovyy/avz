@@ -153,7 +153,7 @@ into the issue that owns it. Highest-risk behaviors and where they are tested:
 | Half-written output on failure | Integration | M1 encoder issue: `ffmpeg_death_midrender_leaves_no_output_file` |
 | Nondeterminism / shader drift | Golden frames, software adapter | M2 golden-harness issue |
 | Config precedence and strict keys | Unit | M0 config issue: `set_override_beats_config_file_value` |
-| End-to-end pipeline | Integration in CI | M1 CI issue: 2 s 320×180 software render + ffprobe asserts |
+| End-to-end pipeline | Integration in CI | M1 CI issue: 2 s software render + ffprobe asserts, `crates/avz-cli/tests/render_e2e.rs` |
 
 Not automatable: "feels musical" (manual listening pass, M2 and each release)
 and lavapipe behavior on a genuinely GPU-less host (manual, documented).
@@ -197,7 +197,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
   rename, stderr monitoring *(prerequisite: Step 3)*
 - [x] **Step 9** - Pipeline orchestration: progress callback trait, hardcoded RMS
   test shader, `--sample` *(prerequisite: Steps 6, 7, 8)*
-- [ ] **Step 10** - CI integration test: 2 s software render, ffprobe asserts
+- [x] **Step 10** - CI integration test: 2 s software render, ffprobe asserts
   *(prerequisite: Step 9)*
 
 **M2 — Real analysis + envelope tuning** *(accept: `pulse` distinguishes kick/vocals/cymbals; onsets on-beat)*
