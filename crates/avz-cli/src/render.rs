@@ -9,7 +9,9 @@ use std::path::{Path, PathBuf};
 
 use avz_core::Error;
 use avz_core::Progress as _;
-use avz_core::config::{BackgroundLayer, ConfigLayer, Resolution, Sources, TextLayer, VisualLayer};
+use avz_core::config::{
+    BackgroundLayer, ConfigLayer, OutputLayer, Resolution, Sources, TextLayer, VisualLayer,
+};
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
 
@@ -108,8 +110,17 @@ fn sample_resolution_warning(resolution: Resolution) -> String {
 /// default, and a flag defaulting to it would outrank every config file.
 fn cli_layer(args: &RenderArgs) -> ConfigLayer {
     ConfigLayer {
+        output: OutputLayer {
+            codec: args.codec,
+            // Widened, never range-checked here: clap already rejected a CRF
+            // outside x264's scale, and `resolve` is what a config file's
+            // `output.quality` answers to.
+            quality: args.quality.map(i64::from),
+            ..OutputLayer::default()
+        },
         visual: VisualLayer {
             palette: args.palette.clone(),
+            seed: args.seed,
             ..VisualLayer::default()
         },
         background: BackgroundLayer {
@@ -124,7 +135,6 @@ fn cli_layer(args: &RenderArgs) -> ConfigLayer {
             artist: args.artist.clone(),
             ..TextLayer::default()
         },
-        ..ConfigLayer::default()
     }
 }
 
@@ -228,6 +238,37 @@ mod tests {
             cli_layer(&render_args(&["--no-text"])).text.enabled,
             Some(false)
         );
+    }
+
+    /// `--seed`, `--codec`, and `--quality` reach the layer that outranks the
+    /// config file. Without this they parse, validate, and are silently dropped:
+    /// `--quality 30` would write a CRF-18 file and say nothing.
+    #[test]
+    fn the_seed_codec_and_quality_flags_reach_the_cli_config_layer() {
+        let layer = cli_layer(&render_args(&[
+            "--seed",
+            "7",
+            "--codec",
+            "x264",
+            "--quality",
+            "30",
+        ]));
+
+        assert_eq!(layer.visual.seed, Some(avz_core::config::Seed::Fixed(7)));
+        assert_eq!(layer.output.codec, Some(avz_core::config::Codec::X264));
+        assert_eq!(layer.output.quality, Some(30));
+    }
+
+    /// The CRF the flag names is the CRF ffmpeg is given: `--quality` is the
+    /// only thing between a user and `-crf` (`VISION.md` §5.4).
+    #[test]
+    fn the_quality_flag_becomes_the_resolved_crf() {
+        let sources = Sources {
+            cli: cli_layer(&render_args(&["--quality", "30"])),
+            ..Sources::default()
+        };
+
+        assert_eq!(sources.resolve().expect("resolves").output.quality, 30);
     }
 
     /// An unpassed flag must have no opinion, or it would displace the config

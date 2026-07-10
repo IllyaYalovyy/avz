@@ -16,6 +16,7 @@
 //! pipeline consumes. [`Sources`] is the only place the precedence order is
 //! written down.
 
+mod example;
 mod set;
 mod value;
 
@@ -25,6 +26,7 @@ use serde::Deserialize;
 
 use crate::{Error, Result};
 
+pub use example::example;
 pub use value::{
     Codec, Color, Fit, FontChoice, MAX_PALETTE_COLORS, MIN_PALETTE_COLORS, Palette, ParseError,
     Position, Resolution, SampleRange, Seconds, Seed,
@@ -522,7 +524,10 @@ pub const SAMPLE_RESOLUTION: &str = "720p";
 const MAX_FPS: u32 = 240;
 
 /// x264's CRF scale tops out at 51.
-const MAX_CRF: u8 = 51;
+///
+/// Public because `--quality` has to reject the same range the config file does,
+/// and clap rejects it before `avz-core` is ever reached.
+pub const MAX_CRF: u8 = 51;
 
 /// Half the frame height of margin on each side leaves the card nowhere to sit.
 const MAX_TEXT_MARGIN: f64 = 0.5;

@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::analysis::{self, EnvelopeParams};
-use crate::config::{BackgroundSource, Config, Resolution, SampleRange, Seed};
+use crate::config::{BackgroundSource, Config, Resolution, SampleRange};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::meta;
 use crate::render::{
@@ -93,6 +93,10 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let preset = Preset::by_name(&config.visual.preset)?;
     let params = preset.schema()?.resolve(&config.visual.params)?;
     let palette = palette::resolve(&config.visual.palette)?;
+    // A codec avz cannot encode is worth hearing about before the song is
+    // analyzed, not after: `Encoder::start` would raise the same error, an
+    // hour into a software render (RFC-001 NG3).
+    crate::encode::video_encoder(config.output.codec)?;
     let background = Background::load(&config.background)?;
     let resolution = config.output.resolution;
     warn_if_background_is_upscaled(config, &background, resolution, progress);
@@ -146,7 +150,11 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         .collect();
     let compositor = Compositor::new(&gpu, &layers)?;
 
-    let seed = seed_value(config.visual.seed);
+    // `auto` is the file's own name, hashed (`VISION.md` §5.3). Logged because
+    // it is the one input to a render the user never typed, and the one they
+    // need in hand to reproduce a video they liked.
+    let seed = config.visual.seed.resolve(request.input);
+    tracing::debug!(seed, requested = %config.visual.seed, "seeded");
 
     let settings = EncodeSettings {
         width: resolution.width,
@@ -316,21 +324,6 @@ fn no_ink_warning(font: &crate::config::FontChoice) -> String {
     )
 }
 
-/// The seed `auto` stands for, until RFC-001 Step 22 derives it from the input
-/// file name.
-///
-/// Fixed rather than random: two renders of the same song must already match
-/// today (`AGENTS.md`, determinism), and a seed nobody chose is still a seed.
-const AUTO_SEED: u64 = 0;
-
-/// The `u64` the render hashes its noise from.
-fn seed_value(seed: Seed) -> u64 {
-    match seed {
-        Seed::Auto => AUTO_SEED,
-        Seed::Fixed(value) => value,
-    }
-}
-
 /// The half-open range of timeline frames a render covers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct FrameRange {
@@ -413,7 +406,7 @@ fn audio_start(range: FrameRange, fps: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{FontChoice, Palette, Seconds};
+    use crate::config::{FontChoice, Palette, Seconds, Seed};
 
     fn sample(start: &str, end: &str) -> SampleRange {
         format!("{start}..{end}").parse().expect("a sample range")
@@ -488,12 +481,21 @@ mod tests {
         );
     }
 
-    /// `--seed` fixes the number; `auto` stands for one nobody chose but which
-    /// is still the same on every render (RFC-001 Step 22 derives it properly).
+    /// The seed the shader is handed is the one the config asked for, resolved
+    /// against the song being rendered. `Seed::resolve` is tested against every
+    /// path shape in `config::tests`; this pins that the pipeline asks it at
+    /// all, and asks it about the *input*.
     #[test]
-    fn a_fixed_seed_reaches_the_shader_and_auto_is_stable() {
-        assert_eq!(seed_value(Seed::Fixed(7)), 7);
-        assert_eq!(seed_value(Seed::Auto), seed_value(Seed::Auto));
+    fn the_render_seed_is_the_configured_seed_resolved_against_the_input() {
+        let song = Path::new("/music/cold-design/winter.mp3");
+
+        assert_eq!(Seed::Fixed(7).resolve(song), 7);
+        assert_eq!(
+            Seed::Auto.resolve(song),
+            Seed::Auto.resolve(Path::new("elsewhere/winter.mp3")),
+            "a song moved between directories renders the same video",
+        );
+        assert_ne!(Seed::Auto.resolve(song), Seed::Auto.resolve(Path::new("x")));
     }
 
     /// The zero-config render has to resolve. A default naming a palette nobody

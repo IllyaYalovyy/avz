@@ -21,9 +21,10 @@ request that does not serve it goes to the backlog.
 pipeline — decode, full FFT analysis with envelopes and onsets, the `pulse`
 preset on the GPU, ffmpeg encode with the original audio muxed untouched — and
 `avz probe` reports tags. `avz presets` lists what ships and prints a preset's
-parameter schema; `--config`, `--set`, `--palette`, `--bg`, and the text-card
-flags configure it. `--preset` below is not a flag yet, and `avz config` still
-exits with "not implemented yet".
+parameter schema; `--config`, `--set`, `--palette`, `--bg`, `--seed`, `--codec`,
+`--quality`, and the text-card flags configure it, and `avz config --example`
+writes a documented template of every one of them. `--preset` below is not a flag
+yet.
 
 **Palettes.** `--palette` takes a built-in name — `ember`, `glacier`, `verdant`,
 `mono`, or `carpathian` — or two to eight inline hex colors, which avz resamples
@@ -100,8 +101,18 @@ avz render song.mp3 --preset ribbons --sample 0:45..1:45
 # Pick the adapter: auto (default), gpu (fail without one), software (lavapipe)
 avz render song.mp3 --adapter software
 
+# Start from a documented template of every setting, at its default
+avz config --example > avz.toml
+
 # Full control via config file (reproducible; check into the album repo)
 avz render song.mp3 --config cold-design.toml
+
+# Reproduce a render exactly. `--seed auto`, the default, hashes the song's file
+# name, so the same mp3 renders the same video from any directory or machine.
+avz render song.mp3 --seed 1337
+
+# Encoding: x264 only in v0.1. `--quality` is the CRF, 0 (huge) to 51 (worst).
+avz render song.mp3 --quality 23
 
 # Tweak one knob on top of a config
 avz render song.mp3 --config base.toml --set visual.intensity=1.4

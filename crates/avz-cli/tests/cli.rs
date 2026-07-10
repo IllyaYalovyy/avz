@@ -622,3 +622,72 @@ fn a_set_override_beats_an_illegal_value_in_the_config_file() {
         .code(4)
         .stderr(contains("ring_count").not());
 }
+
+// ---------------------------------------------------------------------------
+// `avz config`
+// ---------------------------------------------------------------------------
+
+/// The template goes to *stdout*, because `VISION.md` §5.5 documents redirecting
+/// it into a file. A log line that leaked into it would corrupt the config.
+#[test]
+fn config_example_prints_the_template_to_stdout_and_nothing_to_stderr() {
+    avz()
+        .args(["config", "--example"])
+        .assert()
+        .success()
+        .stdout(contains("[output]"))
+        .stdout(contains("[visual]"))
+        .stdout(contains("[background]"))
+        .stdout(contains("[text]"))
+        .stdout(contains("seed = \"auto\""))
+        .stdout(contains("quality = 18"))
+        .stderr(predicates::str::is_empty());
+}
+
+/// A subcommand asked for nothing says which flag it wanted, and exits 2 rather
+/// than succeeding silently.
+#[test]
+fn config_without_example_exits_2_and_names_the_flag() {
+    avz()
+        .arg("config")
+        .assert()
+        .code(2)
+        .stderr(contains("--example"));
+}
+
+/// UT-008, at the CLI: what `avz config --example` writes, `avz render` reads.
+///
+/// The strict parser rejects unknown keys, so a template that had fallen behind
+/// the schema would fail here — which is the whole risk this round trip covers.
+#[test]
+fn the_example_config_is_accepted_by_render() {
+    let ffmpeg = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("avz.toml");
+
+    let example = avz()
+        .args(["config", "--example"])
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    fs::write(&config, example).expect("write the template avz just printed");
+
+    // The fake ffmpeg encodes nothing, so the render fails at exit 4. What
+    // matters is that it got past config parsing: exit 2 would mean the template
+    // avz printed is a config avz rejects.
+    avz()
+        .env("PATH", ffmpeg.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--out")
+        .arg(dir.path().join("out.mp4"))
+        .args(["--sample", "2s", "--adapter", "software"])
+        .assert()
+        .code(4)
+        .stderr(contains("unknown").not())
+        .stderr(contains("did you mean").not());
+}

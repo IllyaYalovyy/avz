@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 mod cli;
+mod config;
 mod exit;
 mod presets;
 mod probe;
@@ -94,15 +95,7 @@ fn run(cli: &Cli, ui: &Ui) -> anyhow::Result<()> {
         }
         Command::Config(args) => {
             tracing::debug!(example = args.example, "config requested");
-            not_implemented(cli)
+            config::run(args)
         }
     }
-}
-
-/// A command that parses and validates, then politely refuses (`VISION.md` §9).
-fn not_implemented(cli: &Cli) -> anyhow::Result<()> {
-    Err(avz_core::Error::NotImplemented {
-        command: cli.command.name(),
-    }
-    .into())
 }
