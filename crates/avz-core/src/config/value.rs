@@ -128,17 +128,18 @@ impl FromStr for Resolution {
 
 /// Video codec passed to ffmpeg.
 ///
-/// Only [`Codec::X264`] is wired into the encoder for v0.1 (RFC-001 NG3); the
-/// other variants parse so that a config written for a later release fails at
-/// render time with a clear message instead of at parse time with a typo hint.
+/// Every variant encodes. Whether *this* ffmpeg can is a question for the binary
+/// itself, asked before a render starts by
+/// [`ensure_encoder`](crate::encode::ensure_encoder) — a name that parses is not
+/// an encoder that was compiled in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(try_from = "String")]
 pub enum Codec {
-    /// `libx264`, the v0.1 default.
+    /// `libx264`, the default.
     X264,
     /// `libx265`.
     X265,
-    /// AV1.
+    /// `libsvtav1`.
     Av1,
 }
 

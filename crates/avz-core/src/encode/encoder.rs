@@ -50,7 +50,7 @@ pub struct EncodeSettings {
     pub height: u32,
     /// Frames per second, which is also the rate the frames are timestamped at.
     pub fps: u32,
-    /// Video codec. v0.1 encodes x264 only (RFC-001 NG3).
+    /// Video codec. See [`video_encoder`] for the ffmpeg encoder each one names.
     pub codec: Codec,
     /// CRF quality; lower is better.
     pub quality: u8,
@@ -70,33 +70,91 @@ impl EncodeSettings {
     }
 }
 
-/// The x264 speed/size tradeoff from `VISION.md` §5.4. Offline rendering already
-/// costs minutes of GPU time, so the encoder may as well take its time too.
-const X264_PRESET: &str = "slow";
+/// The x264 and x265 speed/size tradeoff from `VISION.md` §5.4. Offline
+/// rendering already costs minutes of GPU time, so the encoder may as well take
+/// its time too.
+const X26X_PRESET: &str = "slow";
+
+/// SVT-AV1's preset is a number, 0 (slowest) to 13 (fastest), and its default of
+/// 10 is tuned for encoding faster than realtime — which avz never has to do.
+/// 6 is the same bargain `slow` strikes for x264: noticeably better than the
+/// default, and still finishing this evening.
+const SVTAV1_PRESET: &str = "6";
 
 /// The ffmpeg encoder name for `codec`.
 ///
-/// Public so [`pipeline::render`](crate::pipeline::render) can ask the question
-/// before it decodes the song rather than after: a `--codec av1` render should
-/// fail in its first millisecond, not once every frame has been drawn.
+/// ffmpeg's spelling, not avz's: `libx264`, because that is what `-c:v` takes.
+/// AV1 has several encoders in ffmpeg; avz names SVT-AV1, which is the one built
+/// for offline encoding at scale, and the one Fedora packages.
+pub fn video_encoder(codec: Codec) -> &'static str {
+    match codec {
+        Codec::X264 => "libx264",
+        Codec::X265 => "libx265",
+        Codec::Av1 => "libsvtav1",
+    }
+}
+
+/// The `-c:v` and its codec-specific knobs, up to but not including `-crf`.
+///
+/// `-crf` is the one knob every encoder here shares, so `--quality` means the
+/// same thing across the matrix and lives in [`ffmpeg_args`]. Everything else
+/// differs: x265 speaks its own parameter language and needs to be told to hush,
+/// and SVT-AV1's preset is a number where x264's is a word.
+fn video_args(codec: Codec) -> Vec<&'static str> {
+    let encoder = video_encoder(codec);
+    match codec {
+        Codec::X264 => vec!["-c:v", encoder, "-preset", X26X_PRESET],
+        Codec::X265 => vec![
+            "-c:v",
+            encoder,
+            "-preset",
+            X26X_PRESET,
+            // libx265 writes its own banner and per-frame summary straight to
+            // stderr, under no ffmpeg log level. avz keeps that stream clear so
+            // its last lines are the diagnosis of a failure.
+            "-x265-params",
+            "log-level=error",
+            // The mp4 muxer tags HEVC `hev1` by default, which QuickTime and
+            // Safari will not play. `hvc1` is the same bitstream, named the way
+            // an Apple demuxer expects to find it.
+            "-tag:v",
+            "hvc1",
+        ],
+        Codec::Av1 => vec!["-c:v", encoder, "-preset", SVTAV1_PRESET],
+    }
+}
+
+/// Refuse a codec this ffmpeg was not built to encode, before the song is read.
+///
+/// A binary that answers `-version` is not a binary that has every encoder:
+/// Fedora's stock `ffmpeg-free` ships without `libx264` and `libx265`. ffmpeg
+/// would say "unknown encoder" itself — but only once avz had spawned it, which
+/// on the render path is after analysis, and after the GPU work.
 ///
 /// # Errors
 ///
-/// [`Error::Config`] for the codecs RFC-001 NG3 defers past v0.1. ffmpeg would
-/// otherwise fail with a message about an unknown encoder, minutes into a
-/// render, and leave the user guessing which spelling it wanted.
-///
-/// Configuration rather than an encode failure, and therefore exit 2 rather than
-/// exit 4 (`VISION.md` §8): `--codec av1` is a thing the user typed, and it will
-/// fail every song in a batch the same way.
-pub fn video_encoder(codec: Codec) -> Result<&'static str> {
-    match codec {
-        Codec::X264 => Ok("libx264"),
-        Codec::X265 | Codec::Av1 => Err(Error::Config(format!(
-            "codec `{}` is not supported yet; avz v0.1 encodes x264 only — use `--codec x264`",
-            codec.as_str(),
-        ))),
+/// [`Error::Config`] when the encoder is absent. Configuration rather than an
+/// encode failure, and therefore exit 2 rather than exit 4 (`VISION.md` §8):
+/// `--codec x265` is a thing the user typed, and it will fail every song in a
+/// batch the same way. [`Error::Encode`] if ffmpeg cannot be asked at all.
+pub fn ensure_encoder(ffmpeg: &Ffmpeg, codec: Codec) -> Result<()> {
+    let encoder = video_encoder(codec);
+    if super::encoders(ffmpeg)?.contains(encoder) {
+        return Ok(());
     }
+
+    let fallback = match codec {
+        Codec::X264 => String::new(),
+        _ => format!(", or render with `--codec {}`", Codec::X264.as_str()),
+    };
+
+    Err(Error::Config(format!(
+        "`{program}` cannot encode `{codec}`: it was built without the `{encoder}` encoder. \
+         On Fedora the stock `ffmpeg-free` package leaves these encoders out — install the \
+         full build from RPM Fusion with `sudo dnf install ffmpeg --allowerasing`{fallback}",
+        program = ffmpeg.program().display(),
+        codec = codec.as_str(),
+    )))
 }
 
 /// Build the argument vector for one render.
@@ -106,11 +164,9 @@ pub fn video_encoder(codec: Codec) -> Result<&'static str> {
 ///
 /// # Errors
 ///
-/// [`Error::Encode`] if the codec is deferred or the frame geometry is one
-/// ffmpeg cannot encode. Both are cheaper to catch here than in a subprocess.
+/// [`Error::Encode`] if the frame geometry is one ffmpeg cannot encode, which is
+/// cheaper to catch here than in a subprocess.
 fn ffmpeg_args(settings: &EncodeSettings, audio: &Path, part: &Path) -> Result<Vec<OsString>> {
-    let encoder = video_encoder(settings.codec)?;
-
     if settings.fps == 0 {
         return Err(Error::Encode("frame rate must not be zero".to_owned()));
     }
@@ -160,16 +216,13 @@ fn ffmpeg_args(settings: &EncodeSettings, audio: &Path, part: &Path) -> Result<V
     args.push("-i".into());
     args.push(audio.into());
 
+    args.extend(["-map", "0:v", "-map", "1:a"].iter().map(OsString::from));
+    args.extend(video_args(settings.codec).iter().map(OsString::from));
+
     args.extend(
         [
-            "-map",
-            "0:v",
-            "-map",
-            "1:a",
-            "-c:v",
-            encoder,
-            "-preset",
-            X264_PRESET,
+            // The one rate knob the whole matrix shares, so `--quality` means
+            // the same thing whichever encoder reads it.
             "-crf",
             &settings.quality.to_string(),
             "-pix_fmt",
@@ -585,31 +638,94 @@ mod tests {
         );
     }
 
-    /// RFC-001 NG3 defers x265 and av1. Refusing them here beats emitting an
-    /// argv ffmpeg rejects with a message about an unknown encoder — and it is
-    /// the user's configuration that is refused (exit 2), not the encoder that
-    /// failed (exit 4).
     #[test]
-    fn a_deferred_codec_is_refused_and_names_the_one_that_works() {
-        for codec in [Codec::X265, Codec::Av1] {
-            let err = ffmpeg_args(
-                &EncodeSettings {
-                    codec,
-                    ..settings()
-                },
-                Path::new("song.mp3"),
-                Path::new("out.mp4.part"),
-            )
-            .expect_err("v0.1 encodes x264 only");
+    fn each_codec_names_the_ffmpeg_encoder_that_speaks_it() {
+        assert_eq!(video_encoder(Codec::X264), "libx264");
+        assert_eq!(video_encoder(Codec::X265), "libx265");
+        assert_eq!(video_encoder(Codec::Av1), "libsvtav1");
+    }
 
-            assert!(matches!(err, Error::Config(_)), "got {err:?}");
-            let msg = err.to_string();
+    /// `--quality` is one number across the matrix (`VISION.md` §5.4), and every
+    /// encoder here reads it from `-crf`. The pixel format is the compatibility
+    /// promise, and it does not move either.
+    #[test]
+    fn every_codec_takes_the_quality_as_a_crf_and_encodes_yuv420p() {
+        for codec in [Codec::X264, Codec::X265, Codec::Av1] {
+            let argv = args(&EncodeSettings {
+                codec,
+                quality: 27,
+                ..settings()
+            });
+
             assert!(
-                msg.contains(codec.as_str()),
-                "name the codec asked for: {msg}"
+                contains_run(&argv, &["-c:v", video_encoder(codec)]),
+                "{argv:?}"
             );
-            assert!(msg.contains("x264"), "name the codec that works: {msg}");
+            assert!(contains_run(&argv, &["-crf", "27"]), "{argv:?}");
+            assert!(contains_run(&argv, &["-pix_fmt", "yuv420p"]), "{argv:?}");
+            assert!(contains_run(&argv, &["-c:a", "copy"]), "{argv:?}");
         }
+    }
+
+    /// x264 and x265 take a named preset; SVT-AV1 takes a number, and `slow`
+    /// would make it refuse to start.
+    #[test]
+    fn each_codec_gets_the_speed_knob_it_understands() {
+        for (codec, preset) in [
+            (Codec::X264, "slow"),
+            (Codec::X265, "slow"),
+            (Codec::Av1, "6"),
+        ] {
+            let argv = args(&EncodeSettings {
+                codec,
+                ..settings()
+            });
+
+            assert!(contains_run(&argv, &["-preset", preset]), "{argv:?}");
+        }
+    }
+
+    /// The mp4 muxer's default HEVC tag, `hev1`, does not play in QuickTime or
+    /// Safari. Nothing else in the matrix needs a tag, and one applied to x264
+    /// would be wrong.
+    #[test]
+    fn hevc_is_tagged_for_the_players_that_insist_on_it() {
+        assert!(
+            contains_run(
+                &args(&EncodeSettings {
+                    codec: Codec::X265,
+                    ..settings()
+                }),
+                &["-tag:v", "hvc1"]
+            ),
+            "x265 must be tagged hvc1"
+        );
+
+        for codec in [Codec::X264, Codec::Av1] {
+            let argv = args(&EncodeSettings {
+                codec,
+                ..settings()
+            });
+            assert!(
+                !argv.iter().any(|arg| arg == "-tag:v"),
+                "{codec:?} needs no stream tag: {argv:?}"
+            );
+        }
+    }
+
+    /// libx265 writes its own banner to stderr under any ffmpeg log level, and
+    /// avz keeps the last eight lines of that stream as a failure's diagnosis.
+    #[test]
+    fn x265_is_told_to_keep_its_banner_out_of_the_diagnosis() {
+        let argv = args(&EncodeSettings {
+            codec: Codec::X265,
+            ..settings()
+        });
+
+        assert!(
+            contains_run(&argv, &["-x265-params", "log-level=error"]),
+            "{argv:?}"
+        );
     }
 
     /// yuv420p subsamples chroma by two, so an odd dimension makes ffmpeg fail

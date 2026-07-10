@@ -103,10 +103,10 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let preset = Preset::by_name(&config.visual.preset)?;
     let params = preset.schema()?.resolve(&config.visual.params)?;
     let palette = palette::resolve(&config.visual.palette)?;
-    // A codec avz cannot encode is worth hearing about before the song is
-    // analyzed, not after: `Encoder::start` would raise the same error, an
-    // hour into a software render (RFC-001 NG3).
-    crate::encode::video_encoder(config.output.codec)?;
+    // A codec this ffmpeg was not built to encode is worth hearing about before
+    // the song is analyzed, not after: ffmpeg would say the same thing itself,
+    // an hour into a software render.
+    crate::encode::ensure_encoder(request.ffmpeg, config.output.codec)?;
     let background = Background::load(&config.background)?;
     let resolution = config.output.resolution;
     warn_if_background_is_upscaled(config, &background, resolution, progress);

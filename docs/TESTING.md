@@ -508,6 +508,19 @@ the whole thing, because `-shortest` truncates the audio to the rendered frames.
 `scripts/quality.d/80-audio-is-never-reencoded.sh` guards the same invariant in
 the source, for hosts where ffmpeg cannot run.
 
+**Testing the codec matrix on an ffmpeg that may not have the codec.** Fedora's
+stock `ffmpeg-free` is built without `libx264` and `libx265`, so a test that
+demands all three encoders fails on a host that is doing nothing wrong.
+`every_available_codec_encodes_a_playable_stream_and_still_copies_the_audio` and
+`each_codec_flag_picks_the_encoder_that_writes_the_video_stream` read
+`ffmpeg -encoders`, skip what is absent, and fail only if *nothing* was
+exercised. A skipped test proves nothing, so
+`scripts/quality.d/45-the-codec-matrix-lives-in-one-place.sh` reads the source
+instead: it fails if an encoder name appears outside `encode/encoder.rs`, if a
+codec loses its encoder, or if `-pix_fmt yuv420p` stops being universal. Between
+them, a wrong `-c:v` is caught on every host and an unplayable stream is caught
+on any host that can encode it.
+
 **The ffmpeg subprocess.** A shell stand-in for ffmpeg is what makes the failure
 paths testable: a real encoder cannot be made to die on cue, or to hold stdin
 open forever. `crates/avz-core/tests/encode_ffmpeg.rs` uses one to prove the
@@ -705,6 +718,9 @@ exists, or `TODO` / `manual` with a reason.
 | ffmpeg dies mid-render, or the finished file cannot be moved into place | Half-written `.mp4` left on disk | Integration | `ffmpeg_death_midrender_leaves_no_output_file`, `a_dropped_encoder_kills_ffmpeg_and_removes_the_part_file`, `a_render_that_cannot_be_moved_into_place_leaves_no_part_file`, `the_output_appears_only_after_a_successful_finish` |
 | ffmpeg's stderr pipe fills while avz waits to write a frame | Render deadlocks with no diagnostic | Integration | `ffmpeg_death_midrender_leaves_no_output_file` (surfaces the drained stderr) |
 | Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (bitstream compare) + unit + quality hook | `muxed_audio_stream_is_copied_not_reencoded`, `the_audio_stream_is_copied_and_never_reencoded`, `scripts/quality.d/80-audio-is-never-reencoded.sh` |
+| `--codec` reaches the config and not the encoder | `--codec av1` writes an h264 file and says nothing | Integration (ffprobe) + unit + quality hook | `each_codec_flag_picks_the_encoder_that_writes_the_video_stream`, `every_available_codec_encodes_a_playable_stream_and_still_copies_the_audio`, `each_codec_names_the_ffmpeg_encoder_that_speaks_it`, `scripts/quality.d/45-the-codec-matrix-lives-in-one-place.sh` |
+| A codec knob is passed to an encoder that does not understand it | ffmpeg refuses to start, an hour into a render, or the mp4 will not play in Safari | Unit | `each_codec_gets_the_speed_knob_it_understands`, `hevc_is_tagged_for_the_players_that_insist_on_it`, `every_codec_takes_the_quality_as_a_crf_and_encodes_yuv420p` |
+| The system ffmpeg was built without the requested encoder | A five-minute render dies at the encode with "unknown encoder" | Unit + integration | `every_listed_encoder_is_named_and_the_legend_is_not`, `the_system_ffmpeg_agrees_with_the_encoder_check`, `a_codec_the_ffmpeg_was_not_built_with_is_refused_by_name`, `a_codec_this_ffmpeg_cannot_encode_exits_2_before_anything_is_rendered` |
 | `background.image` reaches the config and not the frame | `--bg` is decoration; every render draws the palette gradient | Integration (pixels) | `a_background_image_reaches_the_rendered_frames`, `the_bg_flag_reaches_the_cli_config_layer` |
 | A background image is blurred or darkened in sRGB rather than in light | Every background is a stop and a half too dark, and nothing errors | Unit | `darken_dims_the_light_rather_than_the_encoded_byte`, `a_blur_averages_light_rather_than_encoded_bytes`, `darken_of_one_leaves_black`, `darkening_the_background_dims_the_rendered_frames` |
 | `fit = "cover"` scales instead of cropping | A 1×1000 source needs a 1920× enlargement; the render dies allocating the intermediate | Unit | `cover_crops_the_overhanging_axis_and_centers_what_is_left`, `a_sliver_of_an_image_still_occupies_at_least_one_pixel` |

@@ -122,6 +122,30 @@ developed test-first per `docs/TESTING.md`.
   seconds of the loop a full render would have reached. Determinism is untouched.
 - **NG3** - Codec matrix beyond x264 (`--codec x265|av1` deferred; `--quality`
   ships, mapping to CRF).
+  **Landed post-MVP (issue #29):** `--codec x265` and `--codec av1` encode.
+  `--quality` needed no per-encoder mapping after all — `-crf` is a knob libx264,
+  libx265, and libsvtav1 all read, so one number spans the matrix and the argv
+  keeps one shape. Only the speed knob and the container tag differ per codec,
+  and both live in `video_args`, next to the `-c:v` they belong to. AV1 is
+  SVT-AV1 and only SVT-AV1: libaom and rav1e would be a second AV1 code path,
+  each with its own scale, and `scripts/quality.d/45-the-codec-matrix-lives-in-one-place.sh`
+  fails the build if a second encoder name appears.
+
+  The RFC did not anticipate the real hazard, which is not the argv but the
+  binary. A build of ffmpeg that answers `-version` is not a build that has the
+  encoder — Fedora's stock `ffmpeg-free` ships without `libx264` and `libx265` —
+  so preflight now asks `ffmpeg -encoders` and `encode::ensure_encoder` refuses a
+  codec this ffmpeg cannot encode before the song is decoded. That keeps the
+  Step 22 decision intact for a reason it did not have then: a deferred codec was
+  exit 2 because the user typed it, and an absent encoder is exit 2 because the
+  user typed it *and* every song in the batch will fail identically. The exit-4
+  reading — "the encoder had a bad day" — is exactly what it is not.
+
+  Tests are the honest kind: `every_available_codec_encodes_a_playable_stream_and_still_copies_the_audio`
+  and `each_codec_flag_picks_the_encoder_that_writes_the_video_stream` skip the
+  encoders the host does not have, which means neither can be relied on alone.
+  The quality hook reads the source and skips nothing. This non-goal is now
+  closed.
 - **NG4** - Everything already excluded by VISION §2: lyrics, GUI, realtime,
   BPM tracking, editing, Windows/macOS CI, bundled ffmpeg.
 

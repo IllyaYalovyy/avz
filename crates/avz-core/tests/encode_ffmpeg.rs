@@ -1,10 +1,12 @@
 //! The ffmpeg encoder subprocess, against real processes.
 //!
-//! Two kinds of test live here. The atomic-output and mid-render-death tests
+//! Three kinds of test live here. The atomic-output and mid-render-death tests
 //! drive a shell stand-in for ffmpeg, because a real encoder cannot be made to
 //! die on cue. The mux test drives the real system ffmpeg and compares the audio
 //! bitstream it wrote against the source mp3, which is what proves `-c:a copy`
-//! was not quietly swapped for a re-encode (`docs/TESTING.md`).
+//! was not quietly swapped for a re-encode (`docs/TESTING.md`). The codec-matrix
+//! tests drive the real encoders, and skip the ones this ffmpeg was not built
+//! with — a Fedora `ffmpeg-free` has none of x264 or x265.
 
 #![cfg(unix)]
 
@@ -16,7 +18,10 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use avz_core::config::Codec;
-use avz_core::encode::{DEFAULT_PROGRAM, EncodeSettings, Encoder, Ffmpeg, preflight};
+use avz_core::encode::{
+    DEFAULT_PROGRAM, EncodeSettings, Encoder, Ffmpeg, encoders, ensure_encoder, preflight,
+    video_encoder,
+};
 
 /// Small, even, and cheap to encode. 320×180×4 B = 230 400 B per frame, which
 /// is comfortably larger than a pipe buffer — so a write to a dead ffmpeg is a
@@ -307,6 +312,143 @@ fn muxed_audio_stream_is_copied_not_reencoded() {
         muxed.len(),
         original.len(),
     );
+}
+
+// ---------------------------------------------------------------------------
+// The codec matrix
+// ---------------------------------------------------------------------------
+
+/// The mp4 stream name `ffprobe` reports for what each codec produces.
+///
+/// avz's spelling is the ffmpeg *encoder*'s; ffprobe reports the *codec* the
+/// bitstream is. `libx264` writes h264, and only a decode can tell.
+fn probed_codec_name(codec: Codec) -> &'static str {
+    match codec {
+        Codec::X264 => "h264",
+        Codec::X265 => "hevc",
+        Codec::Av1 => "av1",
+    }
+}
+
+/// Encode a second of video with every codec the system ffmpeg has, and skip the
+/// ones it does not: `libx264` and `libx265` are absent from Fedora's stock
+/// `ffmpeg-free`, and a CI box without them must still be able to run the suite.
+///
+/// The video codec is what this asserts; the audio stays a copied mp3 whichever
+/// encoder drew the pictures, which is the invariant the matrix must not break.
+#[test]
+fn every_available_codec_encodes_a_playable_stream_and_still_copies_the_audio() {
+    let ffmpeg = system_ffmpeg();
+    let available = encoders(&ffmpeg).expect("the system ffmpeg lists its encoders");
+    let mut encoded = 0;
+
+    for codec in [Codec::X264, Codec::X265, Codec::Av1] {
+        if !available.contains(video_encoder(codec)) {
+            eprintln!(
+                "skipping {}: this ffmpeg has no `{}` encoder",
+                codec.as_str(),
+                video_encoder(codec),
+            );
+            continue;
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (output, part) = output_paths(dir.path());
+
+        let settings = EncodeSettings {
+            codec,
+            ..settings()
+        };
+        let mut encoder = Encoder::start(&ffmpeg, &settings, &fixture_mp3(), &output)
+            .unwrap_or_else(|err| panic!("{} starts: {err}", codec.as_str()));
+        for index in 0..FPS as u8 {
+            encoder
+                .write_frame(&frame(index.wrapping_mul(8)))
+                .expect("a frame reaches ffmpeg");
+        }
+        encoder
+            .finish()
+            .unwrap_or_else(|err| panic!("{} encodes a second of video: {err}", codec.as_str()));
+
+        assert!(!part.exists(), "the part file is renamed on success");
+        assert_eq!(
+            probe(&output, "v", "codec_name"),
+            probed_codec_name(codec),
+            "{} wrote the wrong video codec",
+            codec.as_str(),
+        );
+        assert_eq!(
+            probe(&output, "a", "codec_name"),
+            "mp3",
+            "{} re-encoded the audio",
+            codec.as_str(),
+        );
+        encoded += 1;
+    }
+
+    assert!(
+        encoded > 0,
+        "the system ffmpeg has none of avz's encoders; the matrix is untested"
+    );
+}
+
+/// A codec this ffmpeg cannot encode is the user's configuration, not a render
+/// failure: exit 2, before the song is decoded (`VISION.md` §8). The message has
+/// to name the encoder, because `libx265` is the string the user must go and
+/// install — `x265` will find them nothing.
+#[test]
+fn a_codec_the_ffmpeg_was_not_built_with_is_refused_by_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = fake_ffmpeg(
+        dir.path(),
+        "if [ \"$2\" = '-encoders' ]; then\n\
+             echo ' V....D libx264              libx264 H.264 (codec h264)'\n\
+             exit 0\n\
+         fi\n",
+    );
+
+    ensure_encoder(&ffmpeg, Codec::X264).expect("an ffmpeg with libx264 encodes x264");
+
+    for codec in [Codec::X265, Codec::Av1] {
+        let err = ensure_encoder(&ffmpeg, codec).expect_err("this ffmpeg has only libx264");
+
+        assert!(
+            matches!(err, avz_core::Error::Config(_)),
+            "a codec the user typed is configuration: {err:?}"
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains(codec.as_str()),
+            "name the codec asked for: {msg}"
+        );
+        assert!(
+            msg.contains(video_encoder(codec)),
+            "name the encoder it needs: {msg}"
+        );
+        assert!(msg.contains("RPM Fusion"), "say where to get it: {msg}");
+        assert!(
+            msg.contains("--codec x264"),
+            "name a codec that works: {msg}"
+        );
+    }
+}
+
+/// The system ffmpeg is the one avz will encode with, so the codec it claims and
+/// the codec it has must agree — otherwise `ensure_encoder` is a check that
+/// passes for a codec `Encoder::start` then fails on.
+#[test]
+fn the_system_ffmpeg_agrees_with_the_encoder_check() {
+    let ffmpeg = system_ffmpeg();
+    let available = encoders(&ffmpeg).expect("the system ffmpeg lists its encoders");
+
+    for codec in [Codec::X264, Codec::X265, Codec::Av1] {
+        assert_eq!(
+            ensure_encoder(&ffmpeg, codec).is_ok(),
+            available.contains(video_encoder(codec)),
+            "{} disagrees with `ffmpeg -encoders`",
+            codec.as_str(),
+        );
+    }
 }
 
 /// The raw audio packet payloads of `file`, with no container around them.
