@@ -13,8 +13,15 @@
 //! features.
 //!
 //! Each frame is a layer stack flattened by the [`Compositor`]: the background —
-//! the palette backdrop, with `background.image` fitted over it — the
-//! visualizer's premultiplied light over that, and the title/artist card on top.
+//! the palette backdrop, with `background.image` fitted over it — a looped
+//! `background.video` over that if there is one, the visualizer's premultiplied
+//! light over that, and the title/artist card on top.
+//!
+//! The background video is the one part of a frame that does not come from the
+//! frame index: it has a clock of its own, and a second ffmpeg turns it into one
+//! frame per rendered frame. So a render always draws the loop from its first
+//! frame, `--sample` included — an excerpt previews the visuals it will get, not
+//! the seconds of the loop the full render would have reached by then.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -24,8 +31,8 @@ use crate::config::{BackgroundSource, Config, Resolution, SampleRange};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::meta;
 use crate::render::{
-    AdapterChoice, AdapterKind, Background, Card, CardText, Compositor, Globals, Gpu, Layer,
-    Offscreen, Preset, TextCard, Visualizer, palette,
+    AdapterChoice, AdapterKind, Background, BackgroundVideo, Card, CardText, Compositor, Globals,
+    Gpu, Layer, Offscreen, Preset, TextCard, VideoSettings, Visualizer, palette,
 };
 use crate::{Error, Phase, Progress, Result};
 
@@ -132,10 +139,13 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
 
     // The layer stack, bottom to top (`VISION.md` §5.3). The background layer is
-    // the palette backdrop with `background.image` fitted over it; the text card
-    // sits on top of the visuals, and is absent altogether when there is nothing
-    // to draw. The looped video (RFC-001 NG2) is a further entry in this slice.
+    // the palette backdrop with `background.image` fitted over it; a
+    // `background.video` is a layer of its own directly above it, redrawn every
+    // frame, and its `contain` letterbox bars are how the backdrop still shows.
+    // The text card sits on top of the visuals, and is absent altogether when
+    // there is nothing to draw.
     let background = background.layer(&gpu, resolution.width, resolution.height, palette);
+    let mut video = background_video(request, resolution, fps, &gpu)?;
     let visual = Layer::new(&gpu, resolution.width, resolution.height, "avz visualizer");
     let visualizer = Visualizer::new(&gpu, preset, &visual)?;
 
@@ -147,8 +157,10 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         })
         .transpose()?;
 
-    let layers: Vec<&Layer> = [&background, &visual]
+    let layers: Vec<&Layer> = [&background]
         .into_iter()
+        .chain(video.iter().map(|(_, layer)| layer))
+        .chain([&visual])
         .chain(text.iter().map(|(_, layer)| layer))
         .collect();
     let compositor = Compositor::new(&gpu, &layers)?;
@@ -193,6 +205,12 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
             palette,
             params,
         );
+        // One frame of the loop per rendered frame, in order, from its first —
+        // `--sample` moves the picture and the sound, never the background loop,
+        // which has a clock of its own and no timestamp in the song.
+        if let Some((video, layer)) = video.as_mut() {
+            video.draw(&gpu, layer)?;
+        }
         visualizer.draw(
             &gpu,
             &visual,
@@ -222,6 +240,47 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         adapter: gpu.kind(),
         output: request.output.to_path_buf(),
     })
+}
+
+/// The looped background video and the layer it draws into, or `None` when
+/// `[background]` names no video.
+///
+/// Started here rather than beside [`Background::load`], which runs before the
+/// song is decoded: a decoder spawned there would spend the whole analysis pass
+/// blocked on a queue nobody is reading. What `load` does check is that the file
+/// is there, which is the part the user can act on.
+///
+/// # Errors
+///
+/// [`Error::Render`] if ffmpeg will not spawn.
+fn background_video(
+    request: &RenderRequest<'_>,
+    resolution: Resolution,
+    fps: u32,
+    gpu: &Gpu,
+) -> Result<Option<(BackgroundVideo, Layer)>> {
+    let config = &request.config.background;
+    let Some(BackgroundSource::Video(source)) = &config.source else {
+        return Ok(None);
+    };
+
+    let settings = VideoSettings {
+        width: resolution.width,
+        height: resolution.height,
+        fps,
+        fit: config.fit,
+        blur: config.blur,
+        darken: config.darken,
+    };
+    let video = BackgroundVideo::start(request.ffmpeg, source, &settings)?;
+    let layer = Layer::new(
+        gpu,
+        resolution.width,
+        resolution.height,
+        "avz background video",
+    );
+
+    Ok(Some((video, layer)))
 }
 
 /// The card `[text]` asks for, shaped and rasterized, or `None` if there is none.

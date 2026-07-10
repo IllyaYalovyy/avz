@@ -12,6 +12,42 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **Looped background video.** `background.video` composites a muted video
+  beneath the visuals, looped for as long as the song lasts. It takes the same
+  `fit`, `blur`, and `darken` as `background.image`, and is still mutually
+  exclusive with it. The last deferral of RFC-001 NG2, which closes that
+  non-goal.
+
+  A second ffmpeg does the work `VISION.md` §5.3 says it should: `-stream_loop -1`
+  loops the source, a `scale`/`crop`/`pad` chain fits it, and `-r` converts its
+  frame rate — so avz reads exactly `width × height × 4` bytes per frame and
+  uploads them. Any format ffmpeg decodes, at any resolution and any rate. `-an`
+  means the video's own audio is never decoded, so it can never reach the mux.
+
+  The frame's alpha is binary by construction: the filter chain flattens the
+  source's alpha *before* it resamples, and only a `contain` letterbox
+  reintroduces transparency, as fully transparent bars. Premultiplied and straight
+  alpha agree there, so the bytes ffmpeg wrote are the bytes the layer stores — no
+  per-frame premultiply — and the compositor draws the palette backdrop through
+  the bars exactly as it does under a `contain` image.
+
+  `blur` and `darken` still happen in light rather than in encoded bytes, but a
+  video pays for them once per *frame* where an image paid once per render. So the
+  default costs nothing at all, a `darken` alone is a 256-entry lookup table built
+  once, and only a `blur` takes the full trip through linear f32.
+
+  The decoder runs on its own thread behind a bounded queue and is read with a
+  timeout, which is `VISION.md` §11's own mitigation for the risk it names there:
+  a wedged decode thread ends the render with a message naming the video, never
+  with a render that hangs, and a decoder that outruns a software render blocks
+  after two frames instead of buffering the whole loop into memory.
+
+  **The loop always starts at its first frame**, `--sample` included. It has a
+  clock of its own and no timestamp in the song, so `--sample 1:00..1:03` previews
+  that minute's visuals over the *opening* three seconds of the loop rather than
+  over the seconds a full render would have reached by then. Determinism is
+  untouched: the same inputs and the same config still produce the same video.
+
 - **`ink` preset.** Ink is dropped into still water on every onset, spreads, feeds
   on the clean water around it, starves where the water is already black, and
   dissolves everywhere else. What is left is a slow, brooding marble that never
@@ -95,6 +131,13 @@ when no API moved, because a config checked into an album repo is an API.
   filtering rounds differently per driver. Generic, not `ribbons`-specific, and
   independent of `needs_feedback`: a preset may ask for either, both, or
   neither. This is the last generic binding RFC-001 planned.
+
+### Changed
+
+- **A `background.video` that does not exist now exits 3, not 2.** It used to be
+  refused as a configuration error, because avz could draw no video at all. It is
+  now a file the user named, exactly like `--bg`, and a batch loop can tell "this
+  song's loop is missing" from "my config is wrong".
 
 ### Fixed
 

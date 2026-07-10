@@ -175,6 +175,78 @@ says the layer is actually in the stack. It compares against the same render
 without the image rather than probing one pixel, because `pulse` draws over the
 background and no single pixel is guaranteed to be the image alone.
 
+**The background video.** ffmpeg loops, scales, and frame-rate-converts it, so
+the tests that matter are about what avz asked for and what came back — never
+about the codec. Both halves are pinned, as with the optional textures.
+
+`crates/avz-core/src/render/video.rs` owns the half that is a pure function.
+`the_loop_is_requested_before_the_input_it_loops` is the whole design in one
+assertion: `-stream_loop` after `-i` applies to nothing, and a loop shorter than
+the song would simply run out mid-render with no test noticing.
+`the_background_videos_audio_is_never_decoded` holds `-an` to the `AGENTS.md`
+audio invariant from the one direction the encoder's own tests cannot see, and
+`every_fit_flattens_the_sources_alpha_before_it_scales` pins the decision the
+whole upload path rests on: with the source's alpha discarded before any
+resampling, the only transparency left is a `contain` letterbox bar, alpha is 0
+or 255 and nothing between, and premultiplied and straight alpha are the same
+bytes. A chain that scaled *first* would smear the bar's edge into fractional
+alpha, and the layer would fringe toward black along every letterbox — invisible
+to a golden hash, and to every other test here.
+
+`crates/avz-core/tests/background_video.rs` owns the half only a real decode can
+answer. `a_one_second_loop_repeats_frame_for_frame_under_a_longer_render` is the
+seam: `-stream_loop -1` re-decodes the same file, so loop *n* is byte-identical to
+loop 0, which turns "seamless" from a tolerance into an equality on whole frames.
+Its fixture is a flat colour per frame stepping by 8 in red, encoded losslessly,
+because `testsrc2` at 64×36 hands back the same bytes for adjacent frames and a
+seam that stuttered by one frame would pass. The two `assert_ne!`s at the end are
+what keep the equality from being vacuous: a loop of one still frame is perfectly
+periodic and proves nothing.
+
+`a_slower_source_is_frame_rate_converted_rather_than_starving_the_render` is `-r`
+as an assertion. Without it a 15 fps loop under a 30 fps render would hand avz
+fifteen frames a second, and the render would block on the decoder for half of
+every second — a pipeline running at half speed, and no test failing.
+`a_contained_video_letterboxes_with_transparent_bars` is the `contain` bar read
+in the alpha channel, which is the only channel that distinguishes "the backdrop
+shows through here" from "a black bar was drawn here".
+
+The pipeline's half is two tests. `a_background_video_reaches_the_rendered_frames`
+says the layer is in the stack, compared against the same render without it for
+the same reason the image test is. `each_rendered_frame_draws_the_next_frame_of_the_loop`
+is the one that covers the bug the picture would hide: a reader that re-uploaded
+the frame it already had, or that ran two frames ahead per rendered frame, draws a
+loop that is magenta all the way through — as magenta as a correct one. So the
+loop counts in red, forty per frame, and the rendered frames must count with it.
+Flatten that loop to a constant and the test fails on frame 3, which is `pulse`'s
+own red refusing to be monotone: the assertion is measuring the background, not
+the preset.
+
+Both tests need a real decoder *and* the raw RGBA avz piped, out of one
+preflighted binary. `recording_ffmpeg_with_a_real_decoder` dispatches on the argv
+— `-stream_loop` appears in the reader's invocation and in no other — and `exec`s
+the system ffmpeg for it.
+
+**A stalled decoder is `VISION.md` §11's named risk, and a fake ffmpeg is how it
+gets tested.** A real one cannot be made to wedge on cue.
+`a_decoder_that_stops_producing_frames_times_out_and_names_the_video` writes one
+frame and then sleeps, which is the exact shape of the failure: the render begins,
+the picture appears, and then nothing. `a_dropped_background_video_kills_ffmpeg_and_joins_its_threads`
+covers the deadlock on the way out — the reader thread is blocked on a full queue
+by then, and only dropping the receiver *before* killing the child unblocks it.
+
+The stand-ins `exec` rather than fork, because the pid avz kills has to be the pid
+holding stdout. A shell that forked `sleep 60` leaves its child holding the pipe
+open, `Drop` blocks in `join`, and the test takes a minute to pass — which is what
+the first draft of this suite did, and what a real ffmpeg never does.
+
+Neither the bound on the queue nor the timeout is visible to any of these tests:
+an unbounded channel delivers the same frames, and a blocking `recv()` returns
+them just as fast. `scripts/quality.d/43-background-video-reader-is-bounded-and-times-out.sh`
+is what says so at the source, and it also holds `-an` there — so a refactor that
+dropped either the bound or the mute has to argue with the hook rather than with
+nothing.
+
 The preset side of that contract is
 `every_preset_draws_a_layer_the_backdrop_shows_through` in `golden_frames.rs`. A
 shader that ends `return vec4<f32>(color, 1.0)` compiles, renders, and hashes
@@ -640,9 +712,16 @@ exists, or `TODO` / `manual` with a reason.
 | A `contain` letterbox or a transparent PNG shows black rather than the backdrop | The palette stops reaching the frame the moment `--bg` is passed | Unit | `a_contained_image_letterboxes_onto_the_palette_backdrop`, `a_transparent_image_lets_the_backdrop_through`, `a_half_transparent_image_blends_with_the_backdrop` |
 | The blur's edge handling pulls black in from outside the frame | Every blurred background is vignetted | Unit | `a_blur_of_a_flat_field_darkens_no_edge`, `a_blur_of_zero_leaves_the_image_untouched`, `a_blur_spreads_light_beyond_the_shape_that_emitted_it` |
 | A missing or corrupt `--bg` fails after the song is decoded, or not at all | A five-minute decode before a one-line error | Unit + integration + CLI | `a_missing_background_image_is_an_input_error_naming_the_path`, `a_file_that_is_not_an_image_is_an_input_error`, `a_missing_background_image_fails_before_the_song_is_even_decoded`, `render_with_a_missing_background_image_exits_3_and_names_the_path` |
-| `background.video` is silently ignored by the renderer that cannot draw it | The user watches a five-minute render come back without the layer they asked for | Unit + integration | `a_background_video_is_refused_with_a_message_that_says_it_is_not_built_yet`, `a_background_video_is_refused_before_the_song_is_even_decoded` |
+| `background.video` reaches the config and not the frame | The layer the user asked for is missing from every video | Integration (pixels) | `a_background_video_reaches_the_rendered_frames` |
+| The background loop freezes, runs ahead, or draws out of order | A still or stuttering loop that every static-picture assertion blesses | Integration (pixels) + integration (real decode) | `each_rendered_frame_draws_the_next_frame_of_the_loop`, `a_one_second_loop_repeats_frame_for_frame_under_a_longer_render` |
+| A slower background video starves the render | The pipeline crawls behind a decoder that has nothing to say | Integration (real decode) | `a_slower_source_is_frame_rate_converted_rather_than_starving_the_render` |
+| A `contain` background video letterboxes onto black rather than the backdrop | The palette stops reaching the frame the moment `background.video` is set | Integration (real decode) | `a_contained_video_letterboxes_with_transparent_bars` |
+| A background video is blurred or darkened in sRGB rather than in light | Every loop is a stop and a half too dark, and nothing errors | Unit | `darken_dims_the_light_rather_than_the_encoded_byte`, `a_blur_averages_light_rather_than_encoded_bytes`, `a_blurred_frame_is_darkened_in_light_too` (all in `render/video.rs`) |
+| The background video's audio is decoded, or reaches the mux | The song is not the only sound in the video | Unit + quality hook | `the_background_videos_audio_is_never_decoded`, `scripts/quality.d/43-background-video-reader-is-bounded-and-times-out.sh` |
+| A missing `background.video` fails after the song is decoded, or as exit 2 | A five-minute decode before a one-line error; a batch loop cannot tell a bad config from a missing file | Unit + integration + CLI | `a_missing_background_video_is_an_input_error_naming_the_path`, `a_missing_background_video_fails_before_the_song_is_even_decoded`, `a_missing_background_video_exits_3_and_names_the_path` |
 | `image` grows past png/jpg | A dozen untrusted-input parsers in the binary, half-supporting formats `--bg` documents away | Quality hook | `scripts/quality.d/41-background-images-stay-png-and-jpeg.sh` |
-| Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |
+| Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Unit (fake decoder) + quality hook | `a_decoder_that_stops_producing_frames_times_out_and_names_the_video`, `a_decoder_that_exits_ends_the_render_with_ffmpegs_own_complaint`, `a_dropped_background_video_kills_ffmpeg_and_joins_its_threads`, `scripts/quality.d/43-background-video-reader-is-bounded-and-times-out.sh` |
+| The background video's frame queue is unbounded | A decoder that outruns lavapipe reads the whole loop into memory, on the host chosen for having no GPU | Quality hook | `scripts/quality.d/43-background-video-reader-is-bounded-and-times-out.sh` |
 | A preset schema declares a parameter the shader never reads | The knob does nothing; `avz presets` documents a lie | Unit + golden frames | `every_schema_parameter_is_read_by_the_shader_that_declares_it`, `param_reaches_declared_uniform_slot` |
 | Two schema parameters claim one uniform component | The second silently overwrites the first; one knob does nothing | Unit | `two_parameters_may_not_claim_the_same_uniform_component`, `a_color_cannot_start_partway_through_its_slot`, `a_slot_beyond_the_uniform_is_rejected` |
 | A schema default drifts from the constant the shader used before it | Every golden hash is rewritten by a change that looks like a refactor | Golden frames | `param_reaches_declared_uniform_slot` (the defaults must render the committed hashes) |

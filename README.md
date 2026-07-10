@@ -18,12 +18,12 @@ preset system, milestones, and backlog. VISION.md is the north star; a feature
 request that does not serve it goes to the backlog.
 
 **Status:** v0.1. The whole pipeline runs: decode, full FFT analysis with
-envelopes and onsets, a preset on the GPU, a background image and a title card
-composited over it, ffmpeg encode with the original audio muxed untouched. Six
-presets ship — `pulse`, `nebula`, `ribbons`, `particles`, `kaleido`, and `ink` —
-selected with `--preset`. See [CHANGELOG.md](CHANGELOG.md) for what landed and
-what is deliberately absent (the looped background video, and every codec but
-x264).
+envelopes and onsets, a preset on the GPU, a background image or looped video and
+a title card composited over it, ffmpeg encode with the original audio muxed
+untouched. Six presets ship — `pulse`, `nebula`, `ribbons`, `particles`,
+`kaleido`, and `ink` — selected with `--preset`. See
+[CHANGELOG.md](CHANGELOG.md) for what landed and what is deliberately absent
+(every codec but x264).
 
 **Presets.** `avz presets` lists them; `avz presets <name>` prints the
 parameters, their defaults and ranges, and any note about software rendering:
@@ -52,8 +52,18 @@ avz render song.mp3 --bg art/forest.png \
       --set background.fit=contain --set background.blur=6 --set background.darken=0.35
 ```
 
-A looped background video is planned but not built; `background.video` is
-refused with a message that says so.
+**Background video.** `background.video` puts a looped, muted video there
+instead — any format ffmpeg can decode, at any resolution and any frame rate.
+It takes the same `fit`, `blur`, and `darken`, and it is mutually exclusive with
+`background.image`:
+
+```bash
+avz render song.mp3 --set background.video=loops/smoke.mp4 --set background.darken=0.4
+```
+
+The loop always starts at its first frame, so `--sample 1:00..1:03` previews the
+visuals of that minute over the *opening* three seconds of the loop. Nothing of
+the video's own audio is decoded, let alone muxed.
 
 **Text card.** The title and artist are read from the song's ID3 tags and set in
 a bundled OFL font over the visuals — fading in at `text.in_at`, holding for

@@ -1359,13 +1359,15 @@ fn a_missing_font_fails_before_the_song_is_even_decoded() {
     assert!(!output.exists() && !part.exists(), "nothing was written");
 }
 
-/// The looped background video is deferred (RFC-001 NG2). A config that asks for
-/// one is refused where the user can act on it, not ignored.
+/// A background video that is not there is the user's argument, and it must be
+/// caught before the song is decoded — not by the ffmpeg that would have been
+/// spawned after the analysis pass.
 #[test]
-fn a_background_video_is_refused_before_the_song_is_even_decoded() {
+fn a_missing_background_video_fails_before_the_song_is_even_decoded() {
     let dir = tempfile::tempdir().expect("tempdir");
     let ffmpeg = recording_ffmpeg(dir.path());
     let (output, part) = output_paths(dir.path());
+    let progress = Recorder::default();
 
     let mut config = config();
     config.background.source = Some(BackgroundSource::Video("loops/smoke.mp4".into()));
@@ -1380,11 +1382,159 @@ fn a_background_video_is_refused_before_the_song_is_even_decoded() {
             sample: None,
             ffmpeg: &ffmpeg,
         },
+        &progress,
+    )
+    .expect_err("there is no such video");
+
+    assert!(matches!(err, Error::Input(_)), "got {err:?}");
+    assert!(err.to_string().contains("smoke.mp4"), "{err}");
+    assert!(progress.phases().is_empty(), "nothing was analyzed");
+    assert!(!output.exists() && !part.exists(), "nothing was written");
+}
+
+/// An ffmpeg stand-in that decodes background video with the real thing and
+/// records the frames avz encodes.
+///
+/// One preflighted binary serves both subprocesses, so a test that wants a real
+/// decoder *and* the raw RGBA avz piped has to dispatch on the argv.
+/// `-stream_loop` appears in the reader's invocation and in no other.
+///
+/// `exec`, so the process avz kills on drop is the one holding the pipe.
+fn recording_ffmpeg_with_a_real_decoder(dir: &Path) -> Ffmpeg {
+    fake_ffmpeg(
+        dir,
+        "case \"$*\" in *-stream_loop*) exec ffmpeg \"$@\";; esac\ncat > \"$part\"",
+    )
+}
+
+/// A one-second, flat-magenta loop: bright in red and blue, black in green.
+fn magenta_loop(dir: &Path) -> PathBuf {
+    let path = dir.join("loop.mp4");
+    let status = Command::new("ffmpeg")
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+        .args(["-i", "color=c=magenta:s=64x36:r=30:d=1"])
+        .args(["-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p"])
+        .arg(&path)
+        .status()
+        .expect("ffmpeg encodes the background loop");
+    assert!(status.success(), "ffmpeg could not encode the loop");
+    path
+}
+
+/// `background.video` is a layer, not a suggestion. Compared against the same
+/// render without it, because `pulse` draws over the background and no single
+/// pixel is guaranteed to be the video alone.
+///
+/// The loop is 64×36 and the frame is 320×180: ffmpeg does the scaling, and
+/// `cover` fills the frame with it. What reaches the pixels is therefore the
+/// video's colour and not the palette's — `ember`'s backdrop has no blue in it.
+#[test]
+fn a_background_video_reaches_the_rendered_frames() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg_with_a_real_decoder(dir.path());
+    let with_video = dir.path().join("with.mp4");
+    let without_video = dir.path().join("without.mp4");
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Video(magenta_loop(dir.path())));
+
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &with_video,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
         &NoopProgress,
     )
-    .expect_err("the background video layer does not exist yet");
+    .expect("the fixture renders over a background video");
 
-    assert!(matches!(err, Error::Config(_)), "got {err:?}");
-    assert!(err.to_string().contains("smoke.mp4"), "{err}");
-    assert!(!output.exists() && !part.exists(), "nothing was written");
+    config.background.source = None;
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &without_video,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect("the fixture renders over the palette backdrop");
+
+    let magenta = recorded_frames(&with_video);
+    let backdrop = recorded_frames(&without_video);
+    assert_eq!(magenta.len(), 6, "0.2 s at 30 fps");
+
+    for (index, frame) in magenta.iter().enumerate() {
+        assert!(
+            mean_channel(frame, 2) > 200.0,
+            "frame {index} should be mostly the magenta background, got {}",
+            mean_channel(frame, 2),
+        );
+        assert!(
+            mean_channel(frame, 2) > mean_channel(&backdrop[index], 2) + 100.0,
+            "frame {index} is no bluer than the render with no video at all",
+        );
+    }
+}
+
+/// A background video hands the renderer one frame per rendered frame, in order.
+///
+/// A reader that re-uploaded the frame it had, or that ran ahead of the render,
+/// would pass every static-picture assertion above: a magenta loop is magenta
+/// whichever of its frames you draw. So the loop here counts in red, one step of
+/// eight per frame, and the rendered frames must count with it.
+#[test]
+fn each_rendered_frame_draws_the_next_frame_of_the_loop() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg_with_a_real_decoder(dir.path());
+    let (output, _) = output_paths(dir.path());
+
+    let source = dir.path().join("counter.mp4");
+    let status = Command::new("ffmpeg")
+        .args(["-y", "-hide_banner", "-loglevel", "error", "-f", "lavfi"])
+        .args(["-i", "color=c=black:s=64x36:r=30:d=0.2"])
+        .args(["-vf", "format=rgb24,geq=r='N*40':g=0:b=0"])
+        .args(["-c:v", "libx264", "-qp", "0", "-pix_fmt", "yuv444p"])
+        .arg(&source)
+        .status()
+        .expect("ffmpeg encodes the counting loop");
+    assert!(status.success());
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Video(source));
+    // The card would cover part of the frame with ink of its own.
+    config.text.enabled = false;
+
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect("the fixture renders over the counting loop");
+
+    let reds: Vec<f64> = recorded_frames(&output)
+        .iter()
+        .map(|frame| mean_channel(frame, 0))
+        .collect();
+
+    for (index, pair) in reds.windows(2).enumerate() {
+        assert!(
+            pair[1] > pair[0],
+            "frame {} is not later in the loop than frame {index}: {reds:?}",
+            index + 1,
+        );
+    }
 }

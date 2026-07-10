@@ -101,6 +101,25 @@ developed test-first per `docs/TESTING.md`.
   are what pay: 1080p is a little over twice the work of 720p.
 - **NG2** - Looped background video. The layer-stack design accounts for it, but
   the second-ffmpeg-reader thread ships post-MVP.
+  **Landed post-MVP (issue #28):** `background.video` is a `Layer` of its own
+  directly above the backdrop, uploaded once per frame from an ffmpeg started with
+  `-stream_loop -1`. The layer-stack design did account for it — `Compositor`
+  took a fourth entry in its slice and no new code — so the work was the reader
+  (`render/video.rs`) and nothing else. This non-goal is now closed.
+
+  Two things the RFC did not anticipate. The first is that the *fit* belongs in
+  ffmpeg's filter chain rather than in avz: a chain that flattens the source's
+  alpha before it scales leaves alpha binary, which makes premultiplied and
+  straight alpha the same bytes, which is what lets a decoded frame be uploaded
+  without a per-frame premultiply. The second is that `blur` and `darken` — free
+  for an image, which is built once — are per-frame for a video, so `darken`
+  became a 256-entry lookup table built once per render and `blur` remains the one
+  knob that costs a trip through linear f32 on every frame.
+
+  The `--sample` interaction is a decision, not an oversight: the loop has a clock
+  of its own and no timestamp in the song, so a render always draws it from its
+  first frame. An excerpt therefore previews the visuals it will get, not the
+  seconds of the loop a full render would have reached. Determinism is untouched.
 - **NG3** - Codec matrix beyond x264 (`--codec x265|av1` deferred; `--quality`
   ships, mapping to CRF).
 - **NG4** - Everything already excluded by VISION §2: lyrics, GUI, realtime,

@@ -202,10 +202,13 @@ fn a_sample_past_the_end_of_the_song_exits_2() {
         .stderr(contains("the song is only 5"));
 }
 
-/// `background.video` parses, validates, and cannot be drawn (RFC-001 NG2). It
-/// is refused as configuration rather than silently ignored.
+/// A `background.video` that is not there is a file problem (exit 3), the same
+/// as a missing `--bg` image — not a bad argument. A batch loop has to tell
+/// "this song's loop is missing" from "my config is wrong".
+///
+/// The errno never reaches the user: `os error 2` names no file.
 #[test]
-fn a_background_video_exits_2_and_says_it_is_not_built_yet() {
+fn a_missing_background_video_exits_3_and_names_the_path() {
     let ffmpeg = ffmpeg_that_passes_preflight();
     let dir = tempfile::tempdir().expect("tempdir");
     let config = dir.path().join("video.toml");
@@ -220,8 +223,8 @@ fn a_background_video_exits_2_and_says_it_is_not_built_yet() {
         .arg("--out")
         .arg(dir.path().join("out.mp4"))
         .assert()
-        .code(2)
-        .stderr(contains("not supported yet"));
+        .code(3)
+        .stderr(contains("smoke.mp4"));
 }
 
 /// x264's CRF scale runs 0..=51. A number outside it never reaches ffmpeg —

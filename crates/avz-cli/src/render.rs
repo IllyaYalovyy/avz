@@ -227,7 +227,7 @@ mod tests {
         );
         assert_eq!(
             layer.background.video, None,
-            "`--bg` names an image; the video layer is RFC-001 NG2",
+            "`--bg` names an image; a loop is `--set background.video=PATH`",
         );
     }
 
