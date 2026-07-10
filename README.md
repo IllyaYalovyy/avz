@@ -21,9 +21,9 @@ request that does not serve it goes to the backlog.
 envelopes and onsets, a preset on the GPU, a background image or looped video and
 a title card composited over it, ffmpeg encode with the original audio muxed
 untouched. Six presets ship — `pulse`, `nebula`, `ribbons`, `particles`,
-`kaleido`, and `ink` — selected with `--preset`. See
-[CHANGELOG.md](CHANGELOG.md) for what landed and what is deliberately absent
-(every codec but x264).
+`kaleido`, and `ink` — selected with `--preset`, and `--codec x264|x265|av1`
+picks the encoder. See [CHANGELOG.md](CHANGELOG.md) for what landed and what is
+deliberately absent.
 
 **Presets.** `avz presets` lists them; `avz presets <name>` prints the
 parameters, their defaults and ranges, and any note about software rendering:
@@ -89,6 +89,11 @@ same picture at different scales. `text.position` is the nine-grid from
   ```bash
   sudo dnf install ffmpeg          # Fedora (primary target platform)
   ```
+
+  Fedora's stock `ffmpeg-free` builds without `libx264` and `libx265`, so
+  `--codec x264` and `--codec x265` need the full ffmpeg from [RPM
+  Fusion](https://rpmfusion.org/) (`sudo dnf install ffmpeg --allowerasing`).
+  avz checks before it renders and names the encoder it could not find.
 
 - A Vulkan driver. Without a GPU, install Mesa lavapipe for software rendering:
 

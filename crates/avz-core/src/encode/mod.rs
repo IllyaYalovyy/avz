@@ -9,5 +9,5 @@
 mod encoder;
 mod preflight;
 
-pub use encoder::{EncodeSettings, Encoder, video_encoder};
-pub use preflight::{DEFAULT_PROGRAM, Ffmpeg, preflight};
+pub use encoder::{EncodeSettings, Encoder, ensure_encoder, video_encoder};
+pub use preflight::{DEFAULT_PROGRAM, Ffmpeg, encoders, preflight};

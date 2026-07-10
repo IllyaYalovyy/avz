@@ -233,6 +233,113 @@ fn an_album_batch_renders_every_song_to_its_own_mp4_unattended() {
     );
 }
 
+/// `--codec` picks the encoder, and the mp4 says which one drew it.
+///
+/// The core suite proves the argv and the encoded stream (`encode_ffmpeg.rs`);
+/// what only the binary can prove is that a flag typed at a shell reaches the
+/// encoder at all — `--codec x265` writing an h264 file would pass every test in
+/// `avz-core`. A codec this ffmpeg was not built with is skipped rather than
+/// failed: Fedora's stock `ffmpeg-free` has neither x264 nor x265.
+#[test]
+fn each_codec_flag_picks_the_encoder_that_writes_the_video_stream() {
+    let available = ffmpeg_encoders();
+    let mut rendered = 0;
+
+    for (codec, encoder, probed) in [
+        ("x264", "libx264", "h264"),
+        ("x265", "libx265", "hevc"),
+        ("av1", "libsvtav1", "av1"),
+    ] {
+        if !available.iter().any(|name| name == encoder) {
+            eprintln!("skipping --codec {codec}: this ffmpeg has no `{encoder}` encoder");
+            continue;
+        }
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let song = dir.path().join("song.mp3");
+        fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+        Command::cargo_bin("avz")
+            .expect("avz binary builds")
+            .arg("render")
+            .arg(&song)
+            .args(["--sample", "300ms", "--adapter", "software"])
+            .args(["--codec", codec])
+            .args(["--set", "output.resolution=320x180"])
+            .assert()
+            .success();
+
+        let output = dir.path().join("song.mp4");
+        assert_eq!(
+            stream(&output, "v", "codec_name"),
+            probed,
+            "--codec {codec} wrote the wrong video stream"
+        );
+        assert_eq!(
+            stream(&output, "a", "codec_name"),
+            "mp3",
+            "--codec {codec} re-encoded the audio"
+        );
+        rendered += 1;
+    }
+
+    assert!(
+        rendered > 0,
+        "the system ffmpeg has none of avz's encoders; the codec matrix is untested"
+    );
+}
+
+/// A codec name avz knows, on an ffmpeg that cannot encode it, is bad
+/// configuration: exit 2, with the encoder to install named (`VISION.md` §8).
+#[test]
+fn a_codec_this_ffmpeg_cannot_encode_names_the_encoder_it_lacks() {
+    let available = ffmpeg_encoders();
+    let Some((codec, encoder)) = [
+        ("x264", "libx264"),
+        ("x265", "libx265"),
+        ("av1", "libsvtav1"),
+    ]
+    .into_iter()
+    .find(|(_, encoder)| !available.iter().any(|name| name == encoder)) else {
+        eprintln!("skipping: this ffmpeg has every encoder avz can name");
+        return;
+    };
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    Command::cargo_bin("avz")
+        .expect("avz binary builds")
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "300ms", "--adapter", "software"])
+        .args(["--codec", codec])
+        .assert()
+        .code(2)
+        .stderr(contains(encoder));
+}
+
+/// The encoder names the system ffmpeg reports, one per line of `-encoders`.
+fn ffmpeg_encoders() -> Vec<String> {
+    let output = Subprocess::new("ffmpeg")
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .expect("the render tests need ffmpeg: `sudo dnf install ffmpeg`");
+
+    assert!(output.status.success(), "`ffmpeg -encoders` failed");
+
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            let mut tokens = line.split_whitespace();
+            let flags = tokens.next()?;
+            let name = tokens.next()?;
+            (flags.len() == 6 && flags.starts_with('V') && name != "=").then(|| name.to_owned())
+        })
+        .collect()
+}
+
 /// Ask `ffprobe` for one entry of every `kind` (`v` or `a`) stream.
 fn stream(file: &Path, kind: &str, entry: &str) -> String {
     ffprobe(file, &["-select_streams", kind], &format!("stream={entry}"))

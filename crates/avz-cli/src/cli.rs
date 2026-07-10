@@ -107,14 +107,20 @@ pub struct RenderArgs {
     #[arg(long, value_name = "auto|N")]
     pub seed: Option<Seed>,
 
-    /// Video codec. avz v0.1 encodes `x264` only.
-    #[arg(long, value_name = "x264")]
+    /// Video codec: `x264` (the default), `x265`, or `av1`.
+    ///
+    /// x265 and av1 make a smaller file at the same quality and take longer to
+    /// encode. The system ffmpeg has to have been built with the encoder —
+    /// `libx264`, `libx265`, or `libsvtav1` — and avz says so before it renders
+    /// if it was not.
+    #[arg(long, value_name = "x264|x265|av1")]
     pub codec: Option<Codec>,
 
-    /// x264 CRF quality, 0 (visually lossless, huge) to 51 (worst).
+    /// CRF quality, 0 (visually lossless, huge) to 51 (worst).
     ///
     /// The default, 18, is safe to upload. Every step of about 6 halves or
-    /// doubles the file size.
+    /// doubles the file size. The scale belongs to the codec: the same number is
+    /// not the same picture across `--codec`.
     #[arg(long, value_name = "CRF", value_parser = clap::value_parser!(u8).range(0..=MAX_CRF as i64))]
     pub quality: Option<u8>,
 
@@ -363,11 +369,13 @@ mod tests {
         }
     }
 
-    /// The deferred codecs still *parse* (RFC-001 NG3): the render, not the
-    /// argument parser, is what says they are not supported yet.
+    /// Whether an encoder exists is the system ffmpeg's business, not the
+    /// argument parser's: every codec avz names parses, and the render is what
+    /// refuses the one this ffmpeg was not built with.
     #[test]
     fn codec_parses_every_name_and_rejects_the_rest() {
         assert_eq!(render_args(&["--codec", "x264"]).codec, Some(Codec::X264));
+        assert_eq!(render_args(&["--codec", "x265"]).codec, Some(Codec::X265));
         assert_eq!(render_args(&["--codec", "av1"]).codec, Some(Codec::Av1));
 
         let err = Cli::try_parse_from(["avz", "render", "song.mp3", "--codec", "h264"])

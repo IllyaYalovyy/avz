@@ -4,9 +4,15 @@
 //! encoder at the end of that is the worst possible time, so `avz` runs
 //! `ffmpeg -version` up front and refuses to start otherwise (`VISION.md` §5.4).
 //!
+//! A binary that runs is not yet a binary that encodes: Fedora's stock
+//! `ffmpeg-free` builds without `libx264` and `libx265`, and there are builds
+//! without `libsvtav1`. [`encoders`] asks the binary itself which encoders it
+//! has, so `--codec x265` on a build that cannot is refused up front too.
+//!
 //! The failure message is the whole point: it names the binary it looked for and
 //! the command that installs it.
 
+use std::collections::BTreeSet;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -83,6 +89,82 @@ pub fn preflight(program: impl AsRef<Path>) -> Result<Ffmpeg> {
     })
 }
 
+/// Every encoder `ffmpeg` was built with, by name.
+///
+/// The names are ffmpeg's own — `libx264`, not `x264` — because they are what
+/// `-c:v` takes. Asking the binary beats a table of distribution packages: a
+/// self-built ffmpeg is as legitimate as a packaged one, and only it knows.
+///
+/// # Errors
+///
+/// [`Error::Encode`] if `ffmpeg -encoders` will not run or exits non-zero. The
+/// binary already answered `-version`, so this is a broken build, not a missing
+/// one, and there is nothing the user can be told to install.
+pub fn encoders(ffmpeg: &Ffmpeg) -> Result<BTreeSet<String>> {
+    let program = ffmpeg.program();
+
+    let output = Command::new(program)
+        .args(["-hide_banner", "-encoders"])
+        .output()
+        .map_err(|err| {
+            Error::Encode(format!(
+                "cannot run `{} -encoders`: {err}",
+                program.display(),
+            ))
+        })?;
+
+    if !output.status.success() {
+        return Err(Error::Encode(format!(
+            "`{} -encoders` failed ({}){}",
+            program.display(),
+            output.status,
+            complaint(&output.stderr),
+        )));
+    }
+
+    let listed = parse_encoders(&String::from_utf8_lossy(&output.stdout));
+
+    if listed.is_empty() {
+        return Err(Error::Encode(format!(
+            "`{} -encoders` listed no encoders; point avz at the real ffmpeg binary, or {INSTALL_HINT}",
+            program.display(),
+        )));
+    }
+
+    tracing::debug!(program = %program.display(), encoders = listed.len(), "ffmpeg encoders listed");
+
+    Ok(listed)
+}
+
+/// Pull the encoder names out of `ffmpeg -encoders`.
+///
+/// Every listed encoder is a six-character capability field, the name, and a
+/// description:
+///
+/// ```text
+///  V....D libx264              libx264 H.264 / AVC (codec h264)
+/// ```
+///
+/// The legend above the list wears the same field (` V..... = Video`), so a name
+/// of `=` is the one thing that has to be dropped. Reading the field rather than
+/// counting header lines survives an ffmpeg that reorders its banner.
+fn parse_encoders(stdout: &str) -> BTreeSet<String> {
+    stdout
+        .lines()
+        .filter_map(|line| {
+            let mut tokens = line.split_whitespace();
+            let flags = tokens.next()?;
+            let name = tokens.next()?;
+
+            let listed = flags.len() == 6
+                && matches!(flags.as_bytes()[0], b'V' | b'A' | b'S')
+                && flags.bytes().all(|flag| b"VAS.FXBD".contains(&flag));
+
+            (listed && name != "=").then(|| name.to_owned())
+        })
+        .collect()
+}
+
 /// Explain why the process never started.
 ///
 /// `NotFound` is the case worth a paragraph: it is what every user without
@@ -135,6 +217,48 @@ built with gcc 15 (GCC)
     const GIT_BANNER: &str = "\
 ffmpeg version N-109212-g1a2b3c4de Copyright (c) 2000-2026 the FFmpeg developers
 ";
+
+    /// `ffmpeg -encoders`, trimmed to one of each shape it prints.
+    const ENCODERS: &str = "\
+Encoders:
+ V..... = Video
+ A..... = Audio
+ S..... = Subtitle
+ .F.... = Frame-level multithreading
+ ..S... = Slice-level multithreading
+ ...X.. = Codec is experimental
+ ....B. = Supports draw_horiz_band
+ .....D = Supports direct rendering method 1
+ ------
+ V....D libx264              libx264 H.264 / AVC / MPEG-4 AVC (codec h264)
+ V....D libx265              libx265 H.265 / HEVC (codec hevc)
+ V..... libsvtav1            SVT-AV1 encoder (codec av1)
+ A....D libmp3lame           libmp3lame MP3 (codec mp3)
+ S..... srt                  SubRip subtitle
+";
+
+    #[test]
+    fn every_listed_encoder_is_named_and_the_legend_is_not() {
+        let listed = parse_encoders(ENCODERS);
+
+        for encoder in ["libx264", "libx265", "libsvtav1", "libmp3lame", "srt"] {
+            assert!(listed.contains(encoder), "{encoder} is listed: {listed:?}");
+        }
+        assert_eq!(listed.len(), 5, "the legend is not an encoder: {listed:?}");
+    }
+
+    #[test]
+    fn an_ffmpeg_without_an_encoder_does_not_claim_it() {
+        let without_x265 = ENCODERS.replace(" V....D libx265", " V....D libnope");
+
+        assert!(!parse_encoders(&without_x265).contains("libx265"));
+    }
+
+    #[test]
+    fn output_from_another_program_lists_no_encoders() {
+        assert!(parse_encoders("GNU coreutils echo 9.5\n").is_empty());
+        assert!(parse_encoders("").is_empty());
+    }
 
     /// A path that cannot exist, so the spawn fails with `NotFound`.
     const ABSENT: &str = "/nonexistent/avz-preflight-no-such-ffmpeg";
@@ -253,6 +377,68 @@ ffmpeg version N-109212-g1a2b3c4de Copyright (c) 2000-2026 the FFmpeg developers
                 msg.contains("broken build"),
                 "message must surface ffmpeg's own complaint: {msg}"
             );
+        }
+
+        /// An ffmpeg that answers both probes: `-version` for [`preflight`],
+        /// `-encoders` for [`encoders`].
+        fn fake_ffmpeg_with_encoders(dir: &Path, listing: &str) -> PathBuf {
+            fake_ffmpeg(
+                dir,
+                &format!(
+                    "case \"$1\" in\n\
+                     -version) echo 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'; exit 0;;\n\
+                     esac\n\
+                     printf '%s' '{listing}'\n"
+                ),
+            )
+        }
+
+        #[test]
+        fn the_encoders_ffmpeg_reports_are_the_encoders_avz_sees() {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = fake_ffmpeg_with_encoders(dir.path(), ENCODERS);
+            let ffmpeg = preflight(&path).expect("preflight");
+
+            let listed = encoders(&ffmpeg).expect("a listing is parsed");
+
+            assert!(listed.contains("libx264"), "{listed:?}");
+            assert!(listed.contains("libsvtav1"), "{listed:?}");
+            assert!(!listed.contains("libaom-av1"), "{listed:?}");
+        }
+
+        /// A binary that answers `-version` and then lists nothing is not an
+        /// ffmpeg avz can encode with, and saying "no `libx264` encoder" would
+        /// send the user after a package they already have.
+        #[test]
+        fn an_ffmpeg_that_lists_no_encoders_is_rejected() {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = fake_ffmpeg_with_encoders(dir.path(), "Encoders:\n");
+            let ffmpeg = preflight(&path).expect("preflight");
+
+            let err = encoders(&ffmpeg).expect_err("an empty listing is not a listing");
+
+            assert!(matches!(err, Error::Encode(_)), "got {err:?}");
+            assert!(err.to_string().contains("no encoders"), "{err}");
+        }
+
+        #[test]
+        fn an_encoder_probe_that_exits_nonzero_is_rejected() {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = fake_ffmpeg(
+                dir.path(),
+                "case \"$1\" in\n\
+                 -version) echo 'ffmpeg version 7.1.5'; exit 0;;\n\
+                 esac\n\
+                 echo 'Unrecognized option' >&2\n\
+                 exit 1\n",
+            );
+            let ffmpeg = preflight(&path).expect("preflight");
+
+            let err = encoders(&ffmpeg).expect_err("a failing probe cannot be believed");
+
+            assert!(matches!(err, Error::Encode(_)), "got {err:?}");
+            assert!(err.to_string().contains("-encoders"), "{err}");
+            assert!(err.to_string().contains("Unrecognized option"), "{err}");
         }
 
         #[test]

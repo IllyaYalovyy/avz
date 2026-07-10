@@ -31,7 +31,9 @@ fn path_without_ffmpeg() -> TempDir {
     tempfile::tempdir().expect("tempdir")
 }
 
-/// A `PATH` holding a stand-in that answers `-version` the way ffmpeg does.
+/// A `PATH` holding a stand-in that answers both of avz's preflight probes:
+/// `-version`, and the `-encoders` listing that says it can encode the default
+/// codec.
 ///
 /// Lets tests reach the code *behind* the preflight gate without a real encoder.
 fn path_with_fake_ffmpeg() -> TempDir {
@@ -39,7 +41,15 @@ fn path_with_fake_ffmpeg() -> TempDir {
     let ffmpeg = dir.path().join("ffmpeg");
     fs::write(
         &ffmpeg,
-        "#!/bin/sh\necho 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'\n",
+        "#!/bin/sh\n\
+         if [ \"$1\" = '-version' ]; then\n\
+             echo 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'\n\
+             exit 0\n\
+         fi\n\
+         if [ \"$2\" = '-encoders' ]; then\n\
+             echo ' V....D libx264              libx264 H.264 (codec h264)'\n\
+             exit 0\n\
+         fi\n",
     )
     .expect("write fake ffmpeg");
     fs::set_permissions(&ffmpeg, fs::Permissions::from_mode(0o755)).expect("chmod");

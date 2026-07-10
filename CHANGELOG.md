@@ -12,6 +12,36 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **The codec matrix.** `--codec x265` and `--codec av1` encode, alongside the
+  `x264` that already did. `--quality` stays one number and reaches all three as
+  `-crf`, `-pix_fmt yuv420p` still holds across the matrix, and the audio is
+  still the original mp3 stream copied in. The last deferral of RFC-001 NG3,
+  which closes that non-goal.
+
+  The knobs differ where the encoders differ, and nowhere else. x264 and x265
+  take `-preset slow` — offline rendering already costs minutes of GPU time.
+  SVT-AV1's preset is a number rather than a word, and its default of 10 is tuned
+  for encoding faster than realtime, which avz never has to do; `-preset 6` is
+  the same bargain `slow` strikes. x265 is told `-x265-params log-level=error`,
+  because libx265 writes its banner to stderr under any ffmpeg log level and avz
+  keeps that stream clear for the last words of a failure. HEVC is tagged
+  `-tag:v hvc1`: the same bitstream the mp4 muxer would have written as `hev1`,
+  named the way QuickTime and Safari insist on finding it.
+
+  **A binary that answers `-version` is not a binary that has the encoder.**
+  Fedora's stock `ffmpeg-free` is built without `libx264` and `libx265`, so avz
+  now asks ffmpeg what it can encode — `ffmpeg -encoders`, parsed — before it
+  decodes the song. A codec this ffmpeg cannot encode exits 2 with the encoder
+  named and the RPM Fusion install line, in the first millisecond rather than
+  after an hour of software rendering. It is the user's configuration that is
+  refused, not the encoder that had a bad day, so a batch loop stops rather than
+  retries (`VISION.md` §8).
+
+  AV1 means SVT-AV1. ffmpeg also offers libaom and rav1e; naming one encoder per
+  codec is what keeps `--quality` a single scale and the argv a single shape, and
+  a quality hook now fails the build if a second encoder name appears anywhere
+  outside `encode/encoder.rs`.
+
 - **Looped background video.** `background.video` composites a muted video
   beneath the visuals, looped for as long as the song lasts. It takes the same
   `fit`, `blur`, and `darken` as `background.image`, and is still mutually
@@ -138,6 +168,10 @@ when no API moved, because a config checked into an album repo is an API.
   refused as a configuration error, because avz could draw no video at all. It is
   now a file the user named, exactly like `--bg`, and a batch loop can tell "this
   song's loop is missing" from "my config is wrong".
+- **`encode::video_encoder` no longer returns a `Result`.** Every codec now names
+  an encoder, so the fallible question moved to `encode::ensure_encoder`, which
+  asks the ffmpeg binary rather than a table. `encode::encoders` is new and lists
+  what a preflighted ffmpeg was built with.
 
 ### Fixed
 

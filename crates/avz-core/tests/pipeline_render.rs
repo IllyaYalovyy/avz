@@ -71,14 +71,23 @@ fn output_paths(dir: &Path) -> (PathBuf, PathBuf) {
     (dir.join("out.mp4"), dir.join("out.mp4.part"))
 }
 
-/// An ffmpeg stand-in that answers `-version` and otherwise runs `body` with
-/// `$part` bound to its last argument. See `encode_ffmpeg.rs`.
+/// An ffmpeg stand-in that answers avz's two preflight probes — `-version`, and
+/// the `-encoders` listing that says it can encode the default codec — and
+/// otherwise runs `body` with `$part` bound to its last argument.
+///
+/// `-encoders` is recognized by its *second* argument, because the
+/// background-video reader's argv also opens with `-hide_banner`. See
+/// `encode_ffmpeg.rs`.
 fn fake_ffmpeg(dir: &Path, body: &str) -> Ffmpeg {
     let path = dir.join("ffmpeg");
     let script = format!(
         "#!/bin/sh
 if [ \"$1\" = '-version' ]; then
     echo 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'
+    exit 0
+fi
+if [ \"$2\" = '-encoders' ]; then
+    echo ' V....D libx264              libx264 H.264 (codec h264)'
     exit 0
 fi
 for part; do :; done

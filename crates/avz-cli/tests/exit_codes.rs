@@ -52,22 +52,36 @@ fn fake_ffmpeg(body: &str) -> TempDir {
     dir
 }
 
-/// An ffmpeg that passes the preflight and encodes nothing.
+/// The two probes avz runs before it spawns an encoder: `-version` to prove the
+/// binary is ffmpeg, `-encoders` to prove it has the codec that was asked for —
+/// and this stand-in has `libx264` and nothing else. A stand-in that answers
+/// neither probe is refused long before the test's own point.
+///
+/// `-encoders` is recognized by its *second* argument, because the
+/// background-video reader's argv also opens with `-hide_banner`.
+const PROBES: &str = "\
+if [ \"$1\" = '-version' ]; then\n\
+    echo 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'\n\
+    exit 0\n\
+fi\n\
+if [ \"$2\" = '-encoders' ]; then\n\
+    echo ' V....D libx264              libx264 H.264 (codec h264)'\n\
+    exit 0\n\
+fi\n";
+
+/// An ffmpeg that passes both preflight probes and encodes nothing.
 fn ffmpeg_that_passes_preflight() -> TempDir {
-    fake_ffmpeg("#!/bin/sh\necho 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'\n")
+    fake_ffmpeg(&format!("#!/bin/sh\n{PROBES}"))
 }
 
-/// An ffmpeg that passes the preflight and then dies on the first frame, the way
-/// a real one does when the disk fills or the codec is missing.
+/// An ffmpeg that passes both preflight probes and then dies on the first frame,
+/// the way a real one does when the disk fills.
 fn ffmpeg_that_dies_midrender() -> TempDir {
-    fake_ffmpeg(
-        "#!/bin/sh\n\
-         case \"$1\" in\n\
-         -version) echo 'ffmpeg version 7.1.5 Copyright (c) 2000-2026'; exit 0;;\n\
-         esac\n\
+    fake_ffmpeg(&format!(
+        "#!/bin/sh\n{PROBES}\
          echo 'Conversion failed: no space left on device' >&2\n\
-         exit 1\n",
-    )
+         exit 1\n"
+    ))
 }
 
 /// An empty `PATH`, so `ffmpeg` cannot be found on it.
@@ -267,10 +281,12 @@ fn a_config_file_quality_outside_the_crf_scale_exits_2() {
         .stderr(contains("output.quality"));
 }
 
-/// `--codec av1` parses (RFC-001 NG3 keeps the names) and is refused as
-/// configuration, before the song is decoded — not as an encode failure after.
+/// An ffmpeg without the requested encoder is refused as configuration, before
+/// the song is decoded — not as an encode failure after. `ffmpeg_that_passes_
+/// preflight` lists `libx264` and nothing else, which is Fedora's `ffmpeg-free`
+/// minus even that.
 #[test]
-fn a_deferred_codec_exits_2_before_anything_is_rendered() {
+fn a_codec_this_ffmpeg_cannot_encode_exits_2_before_anything_is_rendered() {
     let ffmpeg = ffmpeg_that_passes_preflight();
     let dir = tempfile::tempdir().expect("tempdir");
 
@@ -283,7 +299,8 @@ fn a_deferred_codec_exits_2_before_anything_is_rendered() {
         .args(["--codec", "av1"])
         .assert()
         .code(2)
-        .stderr(contains("not supported yet"))
+        .stderr(contains("libsvtav1"))
+        .stderr(contains("RPM Fusion"))
         .stderr(contains("--codec x264"));
 }
 

@@ -43,14 +43,14 @@ pub fn example() -> String {
     );
     key(
         &mut out,
-        "Video codec. avz v0.1 encodes `x264` only.",
+        "Video codec: `x264`, `x265`, or `av1`. The system ffmpeg must have it.",
         "codec",
         &quoted(config.output.codec.as_str()),
     );
     key(
         &mut out,
         &format!(
-            "x264 CRF quality, 0 (visually lossless, huge) to {} (worst).",
+            "CRF quality on the codec's own scale, 0 (visually lossless) to {} (worst).",
             super::MAX_CRF
         ),
         "quality",
