@@ -299,9 +299,11 @@ fn a_set_key_under_an_unknown_section_names_the_sections_and_the_presets() {
     assert!(message.contains("outputt.fps=30"), "{message}");
     assert!(message.contains("did you mean `output`"), "{message}");
 
-    let err = ConfigLayer::from_set_assignments(["nebula.bass_drive=2"]).expect_err("rejected");
+    // A preset avz does not ship, spelled close enough to one it does that the
+    // shorthand would happily have taken it for a section.
+    let err = ConfigLayer::from_set_assignments(["nebulaa.turbulence=2"]).expect_err("rejected");
     assert!(
-        err.to_string().contains("pulse"),
+        err.to_string().contains("nebula"),
         "an unshipped preset must name the ones that do exist: {err}"
     );
 }

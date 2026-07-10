@@ -168,6 +168,14 @@ impl Offscreen {
         &self.view
     }
 
+    /// The texture behind [`Offscreen::view`], as a copy source.
+    ///
+    /// Crate-private: the only thing that copies a frame anywhere other than the
+    /// readback buffer is [`Feedback::capture`](crate::render::feedback::Feedback::capture).
+    pub(crate) fn texture(&self) -> &wgpu::Texture {
+        &self.texture
+    }
+
     /// Fill the whole frame with one linear-space RGBA color.
     ///
     /// Presets draw through [`Offscreen::view`] instead; this is what lets the

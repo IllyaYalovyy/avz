@@ -12,6 +12,7 @@
 //! Populated by RFC-001 Steps 7, 14, 17, 18, 19, and 20.
 
 pub mod adapter;
+pub mod feedback;
 pub mod globals;
 pub mod offscreen;
 pub mod palette;
@@ -20,6 +21,7 @@ pub mod readback;
 pub mod schema;
 
 pub use adapter::{AdapterChoice, AdapterKind};
+pub use feedback::Feedback;
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
 pub use offscreen::{FRAME_FORMAT, Gpu, Offscreen};
 pub use palette::{BUILT_INS, BuiltIn, LinearPalette};

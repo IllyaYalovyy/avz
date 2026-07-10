@@ -18,9 +18,13 @@
 //! AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
 //! ```
 //!
-//! That rewrites `tests/golden/pulse.txt`; commit the new hashes with the shader
-//! change and say in the commit message what moved. Never regenerate to make a
-//! red test green without looking at why it went red.
+//! That rewrites `tests/golden/<preset>.txt`; commit the new hashes with the
+//! shader change and say in the commit message what moved. Never regenerate to
+//! make a red test green without looking at why it went red.
+//!
+//! **Feedback presets are warmed up.** A preset that declares `needs_feedback` is
+//! drawn from frame 0 up to the golden frame, because its picture is a function
+//! of every frame before it. See [`render_hash_on`].
 //!
 //! Needs Mesa's software Vulkan driver: `sudo dnf install mesa-vulkan-drivers`.
 
@@ -88,6 +92,10 @@ fn named(name: &str) -> LinearPalette {
 /// written down, so a change in the DSP cannot silently rewrite the picture the
 /// shader is being held to. The three frames span the shader's inputs — silence,
 /// a hit, and a loud sustained passage.
+///
+/// Every other index is that loud sustained passage, which is what a feedback
+/// preset's warm-up frames are drawn from: an onset at frame 0, then a hundred
+/// frames of dense material for its trail to accumulate out of.
 fn synthetic_frame(frame_index: usize) -> FeatureFrame {
     match frame_index {
         // Near silence, with the onset impulse at full: only the flash shows.
@@ -151,6 +159,14 @@ fn defaults(preset: &Preset) -> PackedParams {
         .expect("the shipped defaults pack")
 }
 
+/// Whether `preset` samples the previous frame, and so must be warmed up.
+fn needs_feedback(preset: &Preset) -> bool {
+    preset
+        .schema()
+        .expect("the shipped schema parses")
+        .needs_feedback
+}
+
 /// Render one preset frame on lavapipe and hash the RGBA bytes.
 ///
 /// Opens its own device, so callers must not already hold [`one_device_at_a_time`].
@@ -169,6 +185,13 @@ fn render_hash_with(
 }
 
 /// [`render_hash_with`], with the palette chosen by the caller too.
+///
+/// A preset that samples the previous frame is drawn from frame 0 up to
+/// `frame_index`, exactly as `pipeline::render` would draw it, and only the last
+/// frame is hashed. Hashing a feedback preset's frame 100 in isolation would pin
+/// a picture with no trails in it — which is to say, none of what the preset is
+/// for. A preset without feedback draws the one frame asked for, so `pulse`'s
+/// committed hashes are the ones it always had.
 fn render_hash_on(
     preset: &Preset,
     frame_index: usize,
@@ -180,18 +203,25 @@ fn render_hash_on(
     let gpu = Gpu::new(AdapterChoice::Software)
         .expect("golden frames need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
     let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, preset).expect("the shipped preset compiles");
+    let visualizer = Visualizer::new(&gpu, preset, &target).expect("the shipped preset compiles");
 
-    let globals = Globals::for_frame(
-        frame_index,
-        FPS,
-        (WIDTH, HEIGHT),
-        seed,
-        synthetic_frame(frame_index),
-        colors,
-        params,
-    );
-    visualizer.draw(&gpu, &target, &globals);
+    let first = if needs_feedback(preset) {
+        0
+    } else {
+        frame_index
+    };
+    for index in first..=frame_index {
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDTH, HEIGHT),
+            seed,
+            synthetic_frame(index),
+            colors,
+            params,
+        );
+        visualizer.draw(&gpu, &target, &globals);
+    }
     let pixels = target.read_rgba(&gpu).expect("the frame reads back");
 
     assert_eq!(pixels.len(), (WIDTH * HEIGHT * 4) as usize);
@@ -571,7 +601,7 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
     let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, preset).expect("pulse compiles");
+    let visualizer = Visualizer::new(&gpu, preset, &target).expect("pulse compiles");
 
     let draw = |features: FeatureFrame| {
         let globals = Globals::for_frame(
@@ -605,6 +635,97 @@ fn every_feature_pulse_reacts_to_changes_the_frame() {
         ..baseline
     });
     assert_ne!(warm, still, "`centroid` never reaches a pixel");
+}
+
+/// `nebula` reads the previous frame, and reads it into the picture.
+///
+/// The plumbing is proven in `feedback_texture.rs` against a shader that does
+/// nothing else. This proves the shipped preset is wired to it: frame 30 of a
+/// render that began at frame 0 carries thirty frames of trail, and frame 30 of
+/// a render that began at frame 30 carries none. Nothing else in this file would
+/// notice a `nebula` that dropped `textureSample` — its golden hashes would
+/// simply be blessed without trails.
+#[test]
+fn nebula_frames_depend_on_the_frames_before_them() {
+    const FRAME: usize = 30;
+
+    let nebula = Preset::by_name("nebula").expect("nebula ships");
+    assert!(needs_feedback(nebula), "nebula asks for the previous frame");
+
+    let warm = render_hash(nebula, FRAME, GOLDEN_SEED);
+
+    // The same frame, rendered cold: one draw, black feedback beneath it.
+    let cold = {
+        let _device = one_device_at_a_time();
+        let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+        let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+        let visualizer = Visualizer::new(&gpu, nebula, &target).expect("nebula compiles");
+        let globals = Globals::for_frame(
+            FRAME,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            synthetic_frame(FRAME),
+            ember(),
+            defaults(nebula),
+        );
+        visualizer.draw(&gpu, &target, &globals);
+        hex(&target.read_rgba(&gpu).expect("the frame reads back"))
+    };
+
+    assert_ne!(
+        warm, cold,
+        "nebula renders frame {FRAME} the same warm or cold: the trail reaches no pixel",
+    );
+}
+
+/// `--sample 3s --adapter software` must produce "stable, non-black, evolving
+/// output" (RFC-001 Step 17). Stable and evolving are the hashes above; that it
+/// is *lit* is this, and a screen-blended trail saturating to white would fail it
+/// as surely as a shader that drew nothing.
+#[test]
+fn nebula_renders_a_lit_frame_that_is_neither_black_nor_blown_out() {
+    let nebula = Preset::by_name("nebula").expect("nebula ships");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+    let visualizer = Visualizer::new(&gpu, nebula, &target).expect("nebula compiles");
+
+    // Ninety frames is the three seconds `--sample 3s` renders at 30 fps: long
+    // enough for the trail to reach whatever level it settles at.
+    for index in 0..90 {
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDTH, HEIGHT),
+            GOLDEN_SEED,
+            synthetic_frame(index),
+            ember(),
+            defaults(nebula),
+        );
+        visualizer.draw(&gpu, &target, &globals);
+    }
+    let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+
+    let lit = pixels
+        .chunks_exact(4)
+        .filter(|px| px[..3] != [0, 0, 0])
+        .count();
+    let white = pixels
+        .chunks_exact(4)
+        .filter(|px| px[..3] == [255, 255, 255])
+        .count();
+    let total = (WIDTH * HEIGHT) as usize;
+
+    assert!(
+        lit * 2 > total,
+        "after 90 frames only {lit} of {total} pixels are lit: nebula renders black",
+    );
+    assert!(
+        white * 4 < total,
+        "after 90 frames {white} of {total} pixels are pure white: the trail blew out",
+    );
 }
 
 /// The M2 tuning instrument: one PNG per driving feature, in `target/pulse-tuning/`.
@@ -667,7 +788,7 @@ fn dump_pulse_tuning_frames() {
     let _device = one_device_at_a_time();
     let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
     let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
-    let visualizer = Visualizer::new(&gpu, preset).expect("pulse compiles");
+    let visualizer = Visualizer::new(&gpu, preset, &target).expect("pulse compiles");
 
     let params = defaults(preset);
     for (name, features) in cases {
@@ -686,6 +807,72 @@ fn dump_pulse_tuning_frames() {
         let path = out.join(format!("{name}.png"));
         image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
             .expect("the frame is WIDTH x HEIGHT RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+}
+
+/// The same instrument for `nebula`, in `target/nebula-tuning/`.
+///
+/// A trail preset cannot be looked at one frame at a time — its whole character
+/// is what a hundred frames leave behind — so this dumps a *sequence*, at
+/// 960x540 and the frame indices where the trail has and has not converged:
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_nebula
+/// ```
+///
+/// The features are a slow bass swell with a hit every second, which is what the
+/// dark-folk material `nebula` is tuned against sounds like to the analyzer.
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual tuning pass; asserts nothing"]
+fn dump_nebula_tuning_frames() {
+    const WIDE: u32 = 960;
+    const TALL: u32 = 540;
+    const KEPT: [usize; 6] = [0, 1, 5, 30, 60, 120];
+
+    let preset = Preset::by_name("nebula").expect("nebula ships");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/nebula-tuning");
+    fs::create_dir_all(&out).expect("create target/nebula-tuning");
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDE, TALL).expect("a 960x540 frame");
+    let visualizer = Visualizer::new(&gpu, preset, &target).expect("nebula compiles");
+
+    let params = defaults(preset);
+    for index in 0..=KEPT[KEPT.len() - 1] {
+        let seconds = index as f32 / FPS as f32;
+        // A bass swell that breathes once every four seconds, a hit on the beat.
+        let swell = 0.5 + 0.5 * (seconds * 0.5).sin();
+        let features = FeatureFrame {
+            rms_env: 0.35 + 0.45 * swell,
+            bass_env: swell,
+            centroid: 0.25 + 0.4 * swell,
+            onset: f32::from(index % FPS as usize == 0),
+            ..FeatureFrame::default()
+        };
+
+        let globals = Globals::for_frame(
+            index,
+            FPS,
+            (WIDE, TALL),
+            GOLDEN_SEED,
+            features,
+            ember(),
+            params,
+        );
+        visualizer.draw(&gpu, &target, &globals);
+
+        if !KEPT.contains(&index) {
+            continue;
+        }
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+        let path = out.join(format!("{index:03}.png"));
+        image::RgbaImage::from_raw(WIDE, TALL, pixels)
+            .expect("the frame is WIDE x TALL RGBA")
             .save(&path)
             .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
     }

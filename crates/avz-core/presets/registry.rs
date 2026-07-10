@@ -15,9 +15,17 @@
 // includes it.
 
 /// Every preset avz ships, in the order `avz presets` lists them.
-pub const PRESETS: &[Preset] = &[Preset {
-    name: "pulse",
-    description: "minimal, geometric: concentric rings driven by the kick",
-    source: include_str!("pulse.wgsl"),
-    schema: include_str!("pulse.json"),
-}];
+pub const PRESETS: &[Preset] = &[
+    Preset {
+        name: "pulse",
+        description: "minimal, geometric: concentric rings driven by the kick",
+        source: include_str!("pulse.wgsl"),
+        schema: include_str!("pulse.json"),
+    },
+    Preset {
+        name: "nebula",
+        description: "organic clouds: an fbm flow field over feedback trails, churned by the bass",
+        source: include_str!("nebula.wgsl"),
+        schema: include_str!("nebula.json"),
+    },
+];

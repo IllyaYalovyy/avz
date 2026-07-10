@@ -32,6 +32,14 @@ pub struct PresetSchema {
     /// The parameters, in declaration order — which is the order
     /// `avz presets <name>` prints them in.
     pub params: Vec<Param>,
+    /// Whether the preset samples the previous frame (`VISION.md` §6).
+    ///
+    /// The one binding a preset may ask the renderer for beyond the uniform.
+    /// Declaring it binds last frame's pixels at `@binding(1)` and a sampler at
+    /// `@binding(2)`; on the first frame of a render they are black. A preset
+    /// that leaves it false gets neither, and a shader that reaches for them
+    /// anyway fails to build rather than sampling whatever was there.
+    pub needs_feedback: bool,
     /// What to tell a user rendering this preset on lavapipe (`VISION.md` §7).
     pub perf_hint: Option<String>,
 }
@@ -202,6 +210,7 @@ impl PresetSchema {
         Ok(Self {
             preset: preset.to_owned(),
             params,
+            needs_feedback: raw.needs_feedback,
             perf_hint: raw.perf_hint,
         })
     }
@@ -370,6 +379,8 @@ fn describe(value: &toml::Value) -> String {
 struct RawSchema {
     #[serde(default)]
     params: Vec<RawParam>,
+    #[serde(default)]
+    needs_feedback: bool,
     #[serde(default)]
     perf_hint: Option<String>,
 }
@@ -724,6 +735,17 @@ mod tests {
         let bare = PresetSchema::parse("test", r##"{"params":[]}"##).expect("an empty schema");
         assert!(bare.perf_hint.is_none());
         assert!(bare.params.is_empty());
+    }
+
+    /// `VISION.md` §6: the previous-frame texture is opt-in, and a preset that
+    /// says nothing must not be handed a binding its shader never declared.
+    #[test]
+    fn feedback_is_off_unless_the_schema_asks_for_it() {
+        assert!(!every_type().needs_feedback, "no `needs_feedback` key");
+
+        let asked = PresetSchema::parse("test", r##"{"needs_feedback":true,"params":[]}"##)
+            .expect("a schema may ask for the previous frame");
+        assert!(asked.needs_feedback);
     }
 
     #[test]
