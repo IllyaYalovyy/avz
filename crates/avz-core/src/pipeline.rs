@@ -4,17 +4,20 @@
 //! [`Progress`](crate::Progress) callback trait. Analysis completes fully before
 //! the first frame is rendered (`VISION.md` §4.2).
 //!
-//! The visualizer is still the M1 tracer bullet: a fullscreen clear whose
-//! brightness follows loudness. Real presets arrive in RFC-001 Step 14 and
-//! replace [`tracer_color`] alone — every other seam here is the final one.
+//! The visualizer is the preset `config.visual.preset` names, drawn against the
+//! `VISION.md` §6 uniform contract. Everything a preset sees comes from
+//! [`Globals`]: the palette, the frame's features, and `frame_index / fps` as
+//! the only clock.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::analysis::{self, EnvelopeParams, FeatureFrame};
-use crate::config::{Config, SampleRange};
+use crate::analysis::{self, EnvelopeParams};
+use crate::config::{Color, Config, SampleRange, Seed};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
-use crate::render::{AdapterChoice, AdapterKind, Gpu, Offscreen};
+use crate::render::{
+    AdapterChoice, AdapterKind, Globals, Gpu, Offscreen, PALETTE_SLOTS, Preset, Visualizer,
+};
 use crate::{Error, Phase, Progress, Result};
 
 /// Everything one `avz render` needs to know.
@@ -77,6 +80,9 @@ const SOFTWARE_FALLBACK_WARNING: &str = "no GPU adapter found, falling back to s
 pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<RenderSummary> {
     let config = request.config;
     let fps = config.output.fps;
+    // Before decoding a five-minute song: a typo'd preset name is the user's
+    // argument, and they should hear about it in the first millisecond.
+    let preset = Preset::by_name(&config.visual.preset)?;
 
     progress.phase_started(Phase::Analyzing, None);
     let audio = analysis::decode(request.input)?;
@@ -96,6 +102,8 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
 
     let resolution = config.output.resolution;
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
+    let visualizer = Visualizer::new(&gpu, preset)?;
+    let seed = seed_value(config.visual.seed);
 
     let settings = EncodeSettings {
         width: resolution.width,
@@ -112,6 +120,7 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         first = range.start,
         %resolution,
         fps,
+        preset = preset.name,
         adapter = %gpu.kind(),
         "rendering"
     );
@@ -119,7 +128,17 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     progress.phase_started(Phase::Rendering, Some(range.len() as u64));
     let mut pixels = Vec::new();
     for index in range.start..range.end {
-        target.clear(&gpu, tracer_color(timeline.frame(index)));
+        // The song's own frame index, not the excerpt's: `--sample 1s..2s` must
+        // draw the same pixels the full render draws at those timestamps.
+        let globals = Globals::for_frame(
+            index,
+            fps,
+            (resolution.width, resolution.height),
+            seed,
+            timeline.frame(index),
+            DEFAULT_PALETTE,
+        );
+        visualizer.draw(&gpu, &target, &globals);
         target.read_rgba_into(&gpu, &mut pixels)?;
         encoder.write_frame(&pixels)?;
         progress.advance(Phase::Rendering, 1);
@@ -138,15 +157,57 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     })
 }
 
-/// The M1 tracer bullet's entire visualizer: brightness follows loudness.
+/// `ember`, hardcoded until RFC-001 Step 16 resolves `visual.palette`.
 ///
-/// Returned in linear space, because the render target is sRGB and encodes on
-/// write. `rms` already spans the song's own dynamic range, so no gain is
-/// invented here; the clamp guards a caller handing over a frame this pipeline
-/// did not analyze.
-fn tracer_color(frame: FeatureFrame) -> [f32; 4] {
-    let level = frame.rms.clamp(0.0, 1.0);
-    [level, level, level, 1.0]
+/// Slot 0 is the background a preset sits on; slots 1..4 are the accent ramp a
+/// preset walks (`presets/pulse.wgsl`, `fn accent`). sRGB here, linearized on
+/// the way into the uniform by [`Globals::for_frame`].
+const DEFAULT_PALETTE: [Color; PALETTE_SLOTS] = [
+    Color {
+        r: 0x1a,
+        g: 0x1a,
+        b: 0x2e,
+        a: 0xff,
+    },
+    Color {
+        r: 0x53,
+        g: 0x34,
+        b: 0x83,
+        a: 0xff,
+    },
+    Color {
+        r: 0xe9,
+        g: 0x45,
+        b: 0x60,
+        a: 0xff,
+    },
+    Color {
+        r: 0xf9,
+        g: 0xa0,
+        b: 0x3f,
+        a: 0xff,
+    },
+    Color {
+        r: 0xff,
+        g: 0xd9,
+        b: 0x3d,
+        a: 0xff,
+    },
+];
+
+/// The seed `auto` stands for, until RFC-001 Step 22 derives it from the input
+/// file name.
+///
+/// Fixed rather than random: two renders of the same song must already match
+/// today (`AGENTS.md`, determinism), and a seed nobody chose is still a seed.
+const AUTO_SEED: u64 = 0;
+
+/// The `u64` the render hashes its noise from.
+fn seed_value(seed: Seed) -> u64 {
+    match seed {
+        Seed::Auto => AUTO_SEED,
+        Seed::Fixed(value) => value,
+    }
 }
 
 /// The half-open range of timeline frames a render covers.
@@ -237,45 +298,23 @@ mod tests {
         format!("{start}..{end}").parse().expect("a sample range")
     }
 
-    fn frame(rms: f32) -> FeatureFrame {
-        FeatureFrame {
-            rms,
-            ..FeatureFrame::default()
-        }
+    /// `--seed` fixes the number; `auto` stands for one nobody chose but which
+    /// is still the same on every render (RFC-001 Step 22 derives it properly).
+    #[test]
+    fn a_fixed_seed_reaches_the_shader_and_auto_is_stable() {
+        assert_eq!(seed_value(Seed::Fixed(7)), 7);
+        assert_eq!(seed_value(Seed::Auto), seed_value(Seed::Auto));
     }
 
+    /// Slot 0 is the background; a preset walks slots 1..4 as its accent ramp.
+    /// Five slots is what the uniform holds (`VISION.md` §6).
     #[test]
-    fn silence_renders_black_and_full_scale_renders_white() {
-        assert_eq!(tracer_color(frame(0.0)), [0.0, 0.0, 0.0, 1.0]);
-        assert_eq!(tracer_color(frame(1.0)), [1.0, 1.0, 1.0, 1.0]);
-    }
-
-    /// The M1 acceptance criterion, as an assertion: brightness follows loudness.
-    #[test]
-    fn a_louder_frame_renders_brighter_than_a_quieter_one() {
-        let quiet = tracer_color(frame(0.1));
-        let loud = tracer_color(frame(0.6));
-
-        for channel in 0..3 {
-            assert!(
-                loud[channel] > quiet[channel],
-                "channel {channel}: {loud:?} is not brighter than {quiet:?}"
-            );
-        }
-    }
-
-    /// `analyze` normalizes `rms` into `0.0..=1.0`, but `tracer_color` takes any
-    /// `FeatureFrame`. A hotter one must clamp, not wrap or wash out.
-    #[test]
-    fn a_frame_hotter_than_full_scale_clamps_to_opaque_white() {
-        assert_eq!(tracer_color(frame(1.4)), [1.0, 1.0, 1.0, 1.0]);
-    }
-
-    #[test]
-    fn every_rendered_frame_is_fully_opaque() {
-        for rms in [0.0, 0.25, 1.0, 2.0] {
-            assert_eq!(tracer_color(frame(rms))[3], 1.0, "rms {rms} is translucent");
-        }
+    fn the_default_palette_fills_every_uniform_slot() {
+        assert_eq!(DEFAULT_PALETTE.len(), PALETTE_SLOTS);
+        assert!(
+            DEFAULT_PALETTE.iter().all(|color| color.a == 0xff),
+            "a translucent palette slot would wash the preset out"
+        );
     }
 
     #[test]

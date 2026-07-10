@@ -1,0 +1,422 @@
+//! Golden frames: every shipped preset, rendered to a hash (`docs/TESTING.md`).
+//!
+//! A shader regression is invisible everywhere else. Unit tests cover the DSP,
+//! `pipeline_render.rs` covers which frames were drawn, and `render_e2e.rs`
+//! covers whether the mp4 opens — none of them would notice a preset that
+//! quietly stopped drawing its rings. This does: it renders hand-built
+//! `FeatureFrame`s, never audio, so the expected picture depends on nothing but
+//! the WGSL, the uniform layout, and the seed.
+//!
+//! **Software adapter only.** GPU float differences across machines are expected
+//! (`AGENTS.md`, determinism), so a golden hash from a hardware adapter would be
+//! a hash of that machine. `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh`
+//! keeps it that way.
+//!
+//! **Regenerating.** When a preset changes on purpose:
+//!
+//! ```bash
+//! AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+//! ```
+//!
+//! That rewrites `tests/golden/pulse.txt`; commit the new hashes with the shader
+//! change and say in the commit message what moved. Never regenerate to make a
+//! red test green without looking at why it went red.
+//!
+//! Needs Mesa's software Vulkan driver: `sudo dnf install mesa-vulkan-drivers`.
+
+use std::fs;
+use std::path::PathBuf;
+use std::sync::{Mutex, MutexGuard, PoisonError};
+
+use avz_core::analysis::FeatureFrame;
+use avz_core::config::Color;
+use avz_core::render::{
+    AdapterChoice, Globals, Gpu, Offscreen, PALETTE_SLOTS, PRESETS, Preset, Visualizer,
+};
+use sha2::{Digest, Sha256};
+
+/// Small enough that lavapipe renders a frame in milliseconds, and 256-byte
+/// aligned per row so a readback padding bug cannot hide in these hashes.
+const WIDTH: u32 = 320;
+const HEIGHT: u32 = 180;
+const FPS: u32 = 30;
+
+/// Fixed forever: a golden hash is a hash of its seed too.
+const GOLDEN_SEED: u64 = 1337;
+
+/// The frames every preset is pinned at: the first, one early, one well into a
+/// song. Frame 0 catches a shader that only works once `time` has advanced.
+const GOLDEN_FRAMES: [usize; 3] = [0, 10, 100];
+
+/// See `pipeline_render.rs`: one Vulkan device per process, or the loader's
+/// debug-utils terminator segfaults when two tests open devices at once.
+static ONE_DEVICE_AT_A_TIME: Mutex<()> = Mutex::new(());
+
+fn one_device_at_a_time() -> MutexGuard<'static, ()> {
+    ONE_DEVICE_AT_A_TIME
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+}
+
+fn golden_file(preset: &Preset) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/golden")
+        .join(format!("{}.txt", preset.name))
+}
+
+fn palette() -> [Color; PALETTE_SLOTS] {
+    ["#1a1a2e", "#533483", "#e94560", "#f9a03f", "#ffd93d"].map(|hex| {
+        hex.parse()
+            .unwrap_or_else(|_| panic!("`{hex}` is a legal color"))
+    })
+}
+
+/// The features of golden frame `frame_index`, built by hand.
+///
+/// Not analyzed from audio: the point of a golden frame is that its input is
+/// written down, so a change in the DSP cannot silently rewrite the picture the
+/// shader is being held to. The three frames span the shader's inputs — silence,
+/// a hit, and a loud sustained passage.
+fn synthetic_frame(frame_index: usize) -> FeatureFrame {
+    match frame_index {
+        // Near silence, with the onset impulse at full: only the flash shows.
+        0 => FeatureFrame {
+            rms: 0.02,
+            rms_env: 0.02,
+            onset: 1.0,
+            flux: 0.9,
+            centroid: 0.0,
+            ..FeatureFrame::default()
+        },
+        // A kick decaying under a bright cymbal: every envelope in play.
+        10 => FeatureFrame {
+            rms: 0.55,
+            rms_env: 0.61,
+            bass: 0.90,
+            bass_env: 0.72,
+            low_mid: 0.40,
+            low_mid_env: 0.35,
+            mid: 0.25,
+            mid_env: 0.30,
+            high: 0.80,
+            high_env: 0.65,
+            air: 0.45,
+            air_env: 0.50,
+            flux: 0.30,
+            onset: 0.25,
+            centroid: 0.70,
+        },
+        // A dense, loud passage: every ring packed, nothing transient.
+        _ => FeatureFrame {
+            rms: 0.95,
+            rms_env: 0.93,
+            bass: 0.50,
+            bass_env: 0.55,
+            low_mid: 0.85,
+            low_mid_env: 0.80,
+            mid: 1.00,
+            mid_env: 0.95,
+            high: 0.35,
+            high_env: 0.40,
+            air: 0.20,
+            air_env: 0.22,
+            flux: 0.05,
+            onset: 0.0,
+            centroid: 0.35,
+        },
+    }
+}
+
+/// Render one preset frame on lavapipe and hash the RGBA bytes.
+///
+/// Opens its own device, so callers must not already hold [`one_device_at_a_time`].
+fn render_hash(preset: &Preset, frame_index: usize, seed: u64) -> String {
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software)
+        .expect("golden frames need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
+    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+    let visualizer = Visualizer::new(&gpu, preset).expect("the shipped preset compiles");
+
+    let globals = Globals::for_frame(
+        frame_index,
+        FPS,
+        (WIDTH, HEIGHT),
+        seed,
+        synthetic_frame(frame_index),
+        palette(),
+    );
+    visualizer.draw(&gpu, &target, &globals);
+    let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+
+    assert_eq!(pixels.len(), (WIDTH * HEIGHT * 4) as usize);
+    hex(&pixels)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    Sha256::digest(bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
+/// `frame <index> <sha256>` per line, the way `tests/golden/<preset>.txt` stores it.
+fn recorded(preset: &Preset) -> Vec<(usize, String)> {
+    let path = golden_file(preset);
+    let text = fs::read_to_string(&path).unwrap_or_else(|err| {
+        panic!(
+            "{}: {err}. Regenerate with `AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core \
+             --test golden_frames`",
+            path.display()
+        )
+    });
+
+    text.lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        .map(|line| {
+            let (index, hash) = line
+                .split_once(char::is_whitespace)
+                .unwrap_or_else(|| panic!("`{line}` is not `<frame> <sha256>`"));
+            (
+                index
+                    .parse()
+                    .unwrap_or_else(|_| panic!("`{index}` is a frame index")),
+                hash.trim().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn write_golden(preset: &Preset, hashes: &[(usize, String)]) {
+    let path = golden_file(preset);
+    fs::create_dir_all(path.parent().expect("tests/golden")).expect("create tests/golden");
+
+    let mut text = format!(
+        "# Golden frame hashes for the `{}` preset: sha256 of the RGBA bytes of a\n\
+         # {WIDTH}x{HEIGHT} software-adapter render, seed {GOLDEN_SEED}, synthetic features.\n\
+         # Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames\n",
+        preset.name,
+    );
+    for (index, hash) in hashes {
+        text.push_str(&format!("{index} {hash}\n"));
+    }
+    fs::write(&path, text).unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+}
+
+fn updating() -> bool {
+    std::env::var_os("AVZ_UPDATE_GOLDEN").is_some()
+}
+
+/// The harness itself: every shipped preset draws exactly the frames it drew
+/// when its hashes were committed. A WGSL edit, a uniform-layout drift, or a
+/// changed default palette all land here.
+#[test]
+fn every_preset_renders_its_golden_frames() {
+    for preset in PRESETS {
+        let hashes: Vec<(usize, String)> = GOLDEN_FRAMES
+            .iter()
+            .map(|&index| (index, render_hash(preset, index, GOLDEN_SEED)))
+            .collect();
+
+        if updating() {
+            write_golden(preset, &hashes);
+            continue;
+        }
+
+        assert_eq!(
+            recorded(preset),
+            hashes,
+            "preset `{}` no longer renders its golden frames. If the change was \
+             intended, regenerate with `AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core \
+             --test golden_frames` and commit the new hashes with the shader.",
+            preset.name,
+        );
+    }
+}
+
+/// Determinism, on one machine and one adapter: the same uniform renders the
+/// same pixels. A shader that read a wall clock or an unseeded RNG fails here
+/// long before anyone compares two machines.
+#[test]
+fn same_inputs_same_hash_twice() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+
+    let once = render_hash(preset, 10, GOLDEN_SEED);
+    let twice = render_hash(preset, 10, GOLDEN_SEED);
+
+    assert_eq!(
+        once, twice,
+        "the same frame rendered two different pictures"
+    );
+}
+
+/// The seed reaches the shader. Without this, `--seed` could be plumbed through
+/// every layer and quietly dropped by the last one.
+#[test]
+fn different_seed_different_hash() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+
+    // Frame 10 has `high_env` up, so the seeded sparkle grid is on screen.
+    let one = render_hash(preset, 10, 1);
+    let other = render_hash(preset, 10, 2);
+
+    assert_ne!(
+        one, other,
+        "the seed does not reach the noise in the shader"
+    );
+}
+
+/// Two frames of the same song look different. A preset wired to a uniform it
+/// never reads would pass every hash test above by rendering one still image.
+#[test]
+fn a_loud_frame_and_a_quiet_one_are_different_pictures() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+
+    let quiet = render_hash(preset, 0, GOLDEN_SEED);
+    let loud = render_hash(preset, 100, GOLDEN_SEED);
+
+    assert_ne!(
+        quiet, loud,
+        "pulse renders the same frame however loud it is"
+    );
+}
+
+/// Every feature `pulse` claims to be driven by actually moves its pixels.
+///
+/// The M2 acceptance criterion — "pulse visibly distinguishes kick (bass),
+/// vocals (mid), cymbals (high)" — as an assertion. Changing one field of the
+/// uniform and nothing else must change the frame. A field misplaced in the
+/// layout, or dropped from the shader, reads as a still picture here.
+#[test]
+fn every_feature_pulse_reacts_to_changes_the_frame() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+
+    // A mid-song frame: `time` is non-zero, so features that only move the
+    // animation (the ring drift `low_mid_env` sets) have somewhere to move.
+    let baseline = FeatureFrame {
+        rms_env: 0.5,
+        centroid: 0.5,
+        ..FeatureFrame::default()
+    };
+
+    /// One feature of the uniform, and the way to turn it up.
+    type Driver = (&'static str, fn(&mut FeatureFrame));
+
+    let driven: [Driver; 8] = [
+        ("rms_env", |f| f.rms_env = 1.0),
+        ("bass_env", |f| f.bass_env = 1.0),
+        ("low_mid_env", |f| f.low_mid_env = 1.0),
+        ("mid_env", |f| f.mid_env = 1.0),
+        ("high_env", |f| f.high_env = 1.0),
+        ("air_env", |f| f.air_env = 1.0),
+        ("flux", |f| f.flux = 1.0),
+        ("onset", |f| f.onset = 1.0),
+    ];
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("golden frames need lavapipe");
+    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+    let visualizer = Visualizer::new(&gpu, preset).expect("pulse compiles");
+
+    let draw = |features: FeatureFrame| {
+        let globals =
+            Globals::for_frame(10, FPS, (WIDTH, HEIGHT), GOLDEN_SEED, features, palette());
+        visualizer.draw(&gpu, &target, &globals);
+        hex(&target.read_rgba(&gpu).expect("the frame reads back"))
+    };
+
+    let still = draw(baseline);
+    for (name, drive) in driven {
+        let mut features = baseline;
+        drive(&mut features);
+        assert_ne!(
+            draw(features),
+            still,
+            "`{name}` reaches the uniform but never reaches a pixel"
+        );
+    }
+
+    // The centroid walks the palette, so it must move the hue rather than the
+    // geometry. Compare against a *different* centroid, not against zero.
+    let warm = draw(FeatureFrame {
+        centroid: 1.0,
+        ..baseline
+    });
+    assert_ne!(warm, still, "`centroid` never reaches a pixel");
+}
+
+/// The M2 tuning instrument: one PNG per driving feature, in `target/pulse-tuning/`.
+///
+/// `VISION.md` §9 budgets a manual pass in which `pulse` is looked at, not
+/// asserted on — "feels musical" has no assertion, and neither does "the kick
+/// reads as a kick". This renders the isolated frames that pass needs, so the
+/// ritual is a command rather than a scratch file someone rewrites every time:
+///
+/// ```bash
+/// cargo test -p avz-core --test golden_frames -- --ignored dump_pulse
+/// ```
+///
+/// `#[ignore]`d because it writes files and asserts nothing.
+#[test]
+#[ignore = "writes PNGs for the manual tuning pass; asserts nothing"]
+fn dump_pulse_tuning_frames() {
+    let preset = Preset::by_name("pulse").expect("pulse ships");
+    let out = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/pulse-tuning");
+    fs::create_dir_all(&out).expect("create target/pulse-tuning");
+
+    let loud = FeatureFrame {
+        rms_env: 0.8,
+        centroid: 0.5,
+        ..FeatureFrame::default()
+    };
+    let cases: [(&str, FeatureFrame); 5] = [
+        ("00-quiet", FeatureFrame::default()),
+        (
+            "01-kick-bass",
+            FeatureFrame {
+                bass_env: 1.0,
+                ..loud
+            },
+        ),
+        (
+            "02-vocals-mid",
+            FeatureFrame {
+                mid_env: 1.0,
+                ..loud
+            },
+        ),
+        (
+            "03-cymbals-high",
+            FeatureFrame {
+                high_env: 1.0,
+                ..loud
+            },
+        ),
+        (
+            "04-onset-flash",
+            FeatureFrame {
+                onset: 1.0,
+                bass_env: 1.0,
+                ..loud
+            },
+        ),
+    ];
+
+    let _device = one_device_at_a_time();
+    let gpu = Gpu::new(AdapterChoice::Software).expect("the tuning pass needs lavapipe");
+    let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a 320x180 frame");
+    let visualizer = Visualizer::new(&gpu, preset).expect("pulse compiles");
+
+    for (name, features) in cases {
+        let globals =
+            Globals::for_frame(10, FPS, (WIDTH, HEIGHT), GOLDEN_SEED, features, palette());
+        visualizer.draw(&gpu, &target, &globals);
+        let pixels = target.read_rgba(&gpu).expect("the frame reads back");
+
+        let path = out.join(format!("{name}.png"));
+        image::RgbaImage::from_raw(WIDTH, HEIGHT, pixels)
+            .expect("the frame is WIDTH x HEIGHT RGBA")
+            .save(&path)
+            .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+    }
+}
