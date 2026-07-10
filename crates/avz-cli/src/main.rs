@@ -10,6 +10,7 @@ mod cli;
 mod exit;
 mod presets;
 mod probe;
+mod progress;
 mod render;
 
 use std::process::ExitCode;
@@ -19,6 +20,7 @@ use tracing_subscriber::EnvFilter;
 
 use crate::cli::{Cli, Command};
 use crate::exit::Exit;
+use crate::progress::{LogWriter, Ui};
 
 fn main() -> ExitCode {
     let cli = match Cli::try_parse() {
@@ -36,9 +38,12 @@ fn main() -> ExitCode {
         }
     };
 
-    init_tracing(cli.verbose, cli.quiet);
+    // Built before tracing, because tracing writes *through* it: a log line that
+    // did not clear the bars first would be overwritten by the next redraw.
+    let ui = Ui::new(cli.quiet);
+    init_tracing(cli.verbose, cli.quiet, ui.log_writer());
 
-    match run(&cli) {
+    match run(&cli, &ui) {
         Ok(()) => Exit::Ok.into(),
         Err(err) => {
             eprintln!("error: {err:#}");
@@ -50,7 +55,7 @@ fn main() -> ExitCode {
 /// Send `tracing` output to stderr so it never contaminates piped stdout.
 ///
 /// `AVZ_LOG` overrides the verbosity flags for debugging.
-fn init_tracing(verbose: bool, quiet: bool) {
+fn init_tracing(verbose: bool, quiet: bool, writer: LogWriter) {
     let default_level = match (verbose, quiet) {
         (true, _) => "debug",
         (_, true) => "error",
@@ -61,13 +66,13 @@ fn init_tracing(verbose: bool, quiet: bool) {
         EnvFilter::try_from_env("AVZ_LOG").unwrap_or_else(|_| EnvFilter::new(default_level));
 
     tracing_subscriber::fmt()
-        .with_writer(std::io::stderr)
+        .with_writer(writer)
         .with_env_filter(filter)
         .with_target(false)
         .init();
 }
 
-fn run(cli: &Cli) -> anyhow::Result<()> {
+fn run(cli: &Cli, ui: &Ui) -> anyhow::Result<()> {
     match &cli.command {
         Command::Render(args) => {
             tracing::debug!(
@@ -77,7 +82,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
                 adapter = %args.adapter,
                 "render requested"
             );
-            render::run(args, cli.quiet)
+            render::run(args, ui)
         }
         Command::Probe(args) => {
             tracing::debug!(input = ?args.input, "probe requested");

@@ -284,6 +284,81 @@ proves it by finding the muxed bitstream verbatim inside the original at a
 non-zero offset: a re-encode would not appear at all, and a missing seek would
 appear at offset zero.
 
+**The progress bars.** `crates/avz-cli/src/progress.rs` turns the `Progress`
+callbacks into one of three presentations, and which one it picks is a pure
+function of `--quiet` and whether stderr is a terminal — so
+`a_bar_is_drawn_only_on_a_terminal_and_never_when_quiet` can pin the decision
+without a terminal in sight.
+
+The bar's *template* is the part that fails silently. `indicatif` rejects a
+malformed template at build time (a panic on the first frame of the first render,
+which `every_template_is_one_indicatif_accepts` moves into a test), but it renders
+an **unregistered** key as the empty string and reports nothing.  `{fps}` is ours
+rather than `indicatif`'s — its own `{per_sec}` prints `39.1114/s` — so a `style()`
+that forgot to bind it would drop the render rate out of every bar and every
+assertion about the template *string* would still pass.
+`the_rendering_bar_draws_its_frame_count_render_fps_and_eta` draws a real bar into
+a `TermLike` that keeps what was written on it, and reads the frame count, the
+rate, and the ETA back out of the pixels.
+
+The line-based fallback exists because a bar's carriage returns pile up into a
+wall of redraw garbage in a CI log or a pipe.
+`a_piped_render_reports_progress_as_lines_rather_than_a_bar` asserts both halves:
+that the deciles are there, and that no `\r` reached the pipe.
+`the_line_fallback_reports_once_per_decile_of_progress` keeps a 9000-frame render
+from writing 9000 lines, and `the_line_fallback_always_ends_at_a_hundred_percent`
+pins the arithmetic at frame counts where `done * 100 / total` skips a decile.
+
+`--verbose`'s log lines and the bars share one stderr. `LogWriter` suspends the
+draw before letting a record through; without it they overwrite each other, which
+is a thing no assertion sees and every user does. That one is verified by hand
+against a pty (below).
+
+**Warnings are named, and their shape is checked twice.**
+`every_pipeline_warning_names_a_consequence_and_an_action` holds every warning
+`avz-core` can emit to the `AGENTS.md` shape: an em dash separating what happened
+from what to do, and a backticked flag or key in the second half. But a test can
+only assert about warnings someone remembered to add to its list, so
+`scripts/quality.d/97-warnings-are-actionable.sh` closes the gap from the other
+side: a `warn()` call must pass a *named* warning — a `*_WARNING` const or a
+`*_warning()` function — never an inline string, and every such name must carry
+both halves. A new warning therefore cannot reach a user without passing through
+the test that enumerates them.
+
+The em dash is not decoration. `upscale_warning` names the background image in
+backticks too, so "contains a backtick" would pass on a warning that quoted the
+path and offered no way out; the hook checks the half *after* the dash.
+
+**The exit-code contract.** `crates/avz-cli/tests/exit_codes.rs` is `VISION.md`
+§8 as a test matrix, driven through the assembled binary the way a shell drives
+it. It exists because `for f in album/*.mp3; do avz render "$f" || break; done` is
+the batch story avz ships instead of a `batch` subcommand, and it can only tell
+"this song has no tags" (3) from "the disk is full" (4) from "my `--config` path
+is wrong" (2) by the number. Each row also asserts the message names the thing the
+user handed avz and never leaks the errno: `os error 2` tells nobody which file.
+
+Writing that matrix found two bugs. A missing `--config` file exited 3 and printed
+`No such file or directory (os error 2)`; it is the user's *argument*, so it is
+now an `Error::Config` (exit 2) whose message is a sentence — exit 3 belongs to
+the song, and a batch loop has to tell "skip this one" from "every one will fail".
+
+**Manual: the bars against a real terminal.** Three things have no assertion,
+because they are about what a terminal *looks* like: that the bar redraws in
+place rather than scrolling, that `--verbose`'s log lines land above it rather
+than through it, and that the ETA and fps are legible while they move. Verified
+by running a full 1080p software render under a pty:
+
+```bash
+cargo build --release -p avz-cli
+python3 -c 'import pty,sys; pty.spawn(["./target/release/avz","render","song.mp3","--adapter","software"])'
+python3 -c 'import pty,sys; pty.spawn(["./target/release/avz","render","song.mp3","--adapter","software","--verbose"])'
+```
+
+Expect `rendering  [========>     ] 81/150 frames  44.8 fps  eta 2s` redrawing in
+place, a spinner on either side of it, and — under `--verbose` — debug records on
+their own lines with no bar text glued to them. `--quiet` must write nothing at
+all to the terminal.
+
 **Manual listening pass.** The M2 reference-track ritual: render 3–4 reference
 tracks (something quiet, something dense, a Cold Design track, a Carpathians
 track) and confirm onsets read as on-beat rather than late. Repeat before each
@@ -398,6 +473,22 @@ exists, or `TODO` / `manual` with a reason.
 | The card is set in a host font | The same render draws different glyphs on two machines | Quality hook | `scripts/quality.d/42-text-rasterizes-from-the-bundled-font.sh`, `the_same_card_rasterizes_to_the_same_bytes_twice` |
 | Unreadable input reported as a cryptic OS error | User cannot tell a bad file from a bad disk | Unit + integration | `a_file_that_lies_about_being_an_mp3_is_an_input_error`, `a_file_of_an_unknown_format_is_an_input_error`, `probe_of_a_missing_file_exits_3` |
 | Cover art picked nondeterministically from a multi-picture tag | Art-reactive presets drift between runs | Unit | `front_cover_wins_over_other_pictures_regardless_of_order`, `a_tag_without_a_front_cover_falls_back_to_the_first_picture` |
+| A progress-bar template key is never registered | The render fps, or the ETA, silently renders as the empty string in every bar; the template string still reads correctly | Unit (renders a real bar) | `the_rendering_bar_draws_its_frame_count_render_fps_and_eta`, `every_template_is_one_indicatif_accepts` |
+| A malformed bar template | A panic on the first frame of the first render, after every test has passed | Unit | `every_template_is_one_indicatif_accepts`, `both_styles_build` |
+| The render fps is computed before any frame has landed | `inf fps` or `NaN fps` in the bar | Unit | `a_render_rate_that_cannot_be_computed_yet_reads_as_unknown` |
+| A bar is drawn into a pipe or a CI log | Thousands of redraws pile up as garbage; the error at the end is buried | Unit + integration | `a_bar_is_drawn_only_on_a_terminal_and_never_when_quiet`, `a_piped_render_reports_progress_as_lines_rather_than_a_bar` (asserts no `\r` reached the pipe) |
+| The line fallback reports once per frame, or never reaches 100% | A 9000-frame render writes 9000 log lines, or looks stalled at 90% | Unit | `the_line_fallback_reports_once_per_decile_of_progress`, `the_line_fallback_always_ends_at_a_hundred_percent`, `progress_beyond_the_total_still_reads_a_hundred_percent`, `a_phase_of_unknown_length_reports_no_percentage` |
+| `--quiet` still prints progress, a warning, or the adapter | The flag `VISION.md` §3 promises is decoration | Unit + integration | `a_silent_ui_draws_nothing_and_still_accepts_every_callback`, `quiet_emits_nothing_on_success` (stdout *and* stderr) |
+| `--verbose` omits the adapter, the ffmpeg command line, or the phase timings | The one flag that exists to explain a wrong render explains nothing | Integration | `verbose_logs_adapter_and_ffmpeg_cmdline` |
+| A `--verbose` log line is drawn through the progress bar | Both are unreadable, and no assertion sees it | Manual (pty) | manual — see "the bars against a real terminal" |
+| A warning says what happened and not what to do | The user cannot act on it; `AGENTS.md`'s CLI invariant is folklore | Unit + quality hook | `warning_text_for_software_fallback_matches_contract`, `every_pipeline_warning_names_a_consequence_and_an_action`, `the_sample_resolution_warning_names_the_size_and_the_way_out`, `scripts/quality.d/97-warnings-are-actionable.sh` |
+| A new warning is added as an inline string, bypassing the tests that enumerate warnings | The shape is checked for four warnings and the fifth says "failed" | Quality hook | `scripts/quality.d/97-warnings-are-actionable.sh` |
+| A background image smaller than the frame is upscaled in silence | Every video is soft and nothing errors; the user blames the preset | Unit + integration | `a_background_smaller_than_the_frame_warns_that_it_will_be_upscaled`, `only_an_image_short_of_the_frame_on_some_axis_is_upscaled`, `a_background_smaller_than_the_frame_warns_once_before_any_frame_is_drawn`, `a_background_as_large_as_the_frame_warns_about_nothing` |
+| `--sample` drops to 720p in silence | The user judges a preview they believe is full size, and ships the wrong picture | Unit + integration | `a_sample_render_that_names_no_resolution_warns_that_it_was_reduced`, `a_configured_resolution_silences_the_sample_resolution_warning`, `a_sample_render_says_it_dropped_to_a_reduced_resolution`, `a_sample_render_at_a_configured_resolution_warns_about_nothing` |
+| An error lands in the wrong exit-code bucket | A batch loop cannot tell "skip this song" from "stop, everything is misconfigured" | Integration (the whole matrix, through the binary) | `crates/avz-cli/tests/exit_codes.rs` |
+| A bare `io::Error` reaches the user | "No such file or directory (os error 2)" names no file; the user cannot tell a bad path from a bad disk | Unit + integration | `an_unreadable_config_file_is_named_in_a_sentence_not_an_errno`, `a_config_file_that_cannot_be_opened_says_why_without_an_errno`, `every_failure_prefixes_its_message_and_names_what_the_user_gave_avz`, `a_missing_config_file_exits_2_and_names_the_path` |
+| A missing `--config` file is classified as an input-file problem | Exit 3 says "this song is broken"; a batch loop skips every song instead of stopping | Unit + integration | `a_missing_config_file_is_a_config_problem_not_an_input_problem`, `a_missing_config_file_exits_2_and_names_the_path` |
+| ffmpeg's own last words never reach the user | "encode failed" and nothing else; the disk was full and nobody knows | Integration (through the binary) | `an_ffmpeg_that_dies_midrender_exits_4_and_reports_its_last_words` |
 | lavapipe unavailable under `--adapter software` | Hard failure on headless boxes | Manual (documented) | manual |
 
 ## Local Quality Gate

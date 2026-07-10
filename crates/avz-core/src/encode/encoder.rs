@@ -248,8 +248,12 @@ impl Encoder {
         let stdin = child.stdin.take().expect("stdin was piped");
         let stderr = child.stderr.take().expect("stderr was piped");
 
+        // The whole command line, argument for argument: `--verbose` exists so a
+        // render that produced the wrong file can be reproduced by hand
+        // (`VISION.md` §8).
         tracing::debug!(
             program = %program.display(),
+            args = ?args,
             width = settings.width,
             height = settings.height,
             fps = settings.fps,

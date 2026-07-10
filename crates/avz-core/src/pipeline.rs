@@ -17,7 +17,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::analysis::{self, EnvelopeParams};
-use crate::config::{Config, SampleRange, Seed};
+use crate::config::{BackgroundSource, Config, Resolution, SampleRange, Seed};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::meta;
 use crate::render::{
@@ -95,6 +95,7 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let palette = palette::resolve(&config.visual.palette)?;
     let background = Background::load(&config.background)?;
     let resolution = config.output.resolution;
+    warn_if_background_is_upscaled(config, &background, resolution, progress);
     // Shaped and rasterized here too, on the CPU, for the same reason: a font
     // that is not there, and a song with no tags to name, are both things the
     // user can act on before the render begins.
@@ -254,6 +255,54 @@ fn no_words_warning(input: &Path) -> String {
     )
 }
 
+/// Say so when `background.image` is smaller than the frame it has to fill.
+fn warn_if_background_is_upscaled(
+    config: &Config,
+    background: &Background,
+    resolution: Resolution,
+    progress: &dyn Progress,
+) {
+    let (Some(BackgroundSource::Image(path)), Some(image)) =
+        (&config.background.source, background.image_size())
+    else {
+        return;
+    };
+
+    let frame = (resolution.width, resolution.height);
+    if needs_upscaling(image, frame) {
+        progress.warn(&upscale_warning(path, image, frame));
+    }
+}
+
+/// Whether `image` has to be enlarged on some axis to cover `frame`.
+///
+/// True on either axis, whatever the fit mode does with the other: `cover` and
+/// `stretch` enlarge the short axis past its pixels, and `contain` enlarges the
+/// binding one. A background bigger than the frame on both axes is only ever
+/// downsampled, which costs nothing anyone can see.
+fn needs_upscaling(image: (u32, u32), frame: (u32, u32)) -> bool {
+    image.0 < frame.0 || image.1 < frame.1
+}
+
+/// What to say when the background image is smaller than the frame it fills.
+///
+/// Nothing errors here — the image is simply stretched, and the render comes
+/// back soft. The blur is the honest way out: an image that was going to be
+/// blurred anyway loses nothing by being enlarged first.
+fn upscale_warning(path: &Path, image: (u32, u32), frame: (u32, u32)) -> String {
+    format!(
+        "`{}` is {}x{}, smaller than the {}x{} frame, so it will be upscaled and look \
+         soft — supply an image at least {}x{}, or `--set background.blur=6` to hide it",
+        path.display(),
+        image.0,
+        image.1,
+        frame.0,
+        frame.1,
+        frame.0,
+        frame.1,
+    )
+}
+
 /// What to say when the words are there and the font cannot draw any of them.
 fn no_ink_warning(font: &crate::config::FontChoice) -> String {
     let font = match font {
@@ -364,10 +413,79 @@ fn audio_start(range: FrameRange, fps: u32) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::{Palette, Seconds};
+    use crate::config::{FontChoice, Palette, Seconds};
 
     fn sample(start: &str, end: &str) -> SampleRange {
         format!("{start}..{end}").parse().expect("a sample range")
+    }
+
+    /// `AGENTS.md`, CLI invariants: a warning names the consequence and the
+    /// action. The em dash separates the two halves, and the action always
+    /// quotes the flag or config key that answers it.
+    fn is_actionable(warning: &str) -> bool {
+        warning.contains('—') && warning.contains('`')
+    }
+
+    /// The canonical warning `AGENTS.md` writes out: what happened, what it
+    /// costs, and how to silence it. Pinned as a string so it stays folklore-free.
+    #[test]
+    fn warning_text_for_software_fallback_matches_contract() {
+        let warning = SOFTWARE_FALLBACK_WARNING;
+
+        assert!(warning.contains("no GPU adapter found"), "{warning}");
+        assert!(warning.contains("software rendering"), "{warning}");
+        assert!(warning.contains("fps"), "the cost is named: {warning}");
+        assert!(
+            warning.contains("`--adapter software` to silence this"),
+            "the action is named: {warning}",
+        );
+        assert!(is_actionable(warning));
+    }
+
+    /// Every warning the pipeline can emit, held to the same shape. A new
+    /// warning that only says what happened fails here rather than in a render
+    /// the user cannot act on.
+    #[test]
+    fn every_pipeline_warning_names_a_consequence_and_an_action() {
+        let warnings = [
+            SOFTWARE_FALLBACK_WARNING.to_owned(),
+            no_words_warning(Path::new("song.mp3")),
+            no_ink_warning(&FontChoice::Auto),
+            upscale_warning(Path::new("art/forest.png"), (800, 600), (1920, 1080)),
+        ];
+
+        for warning in warnings {
+            assert!(is_actionable(&warning), "not actionable: {warning}");
+        }
+    }
+
+    /// A background smaller than the frame is stretched over it, and the render
+    /// comes back soft. Nothing errors, so nothing tells the user unless this does.
+    #[test]
+    fn a_background_smaller_than_the_frame_warns_that_it_will_be_upscaled() {
+        let warning = upscale_warning(Path::new("art/forest.png"), (800, 600), (1920, 1080));
+
+        assert!(warning.contains("art/forest.png"), "{warning}");
+        assert!(warning.contains("800x600"), "the image size: {warning}");
+        assert!(warning.contains("1920x1080"), "the frame size: {warning}");
+        assert!(
+            warning.contains("background.blur"),
+            "the action that hides the softness: {warning}",
+        );
+    }
+
+    /// Either axis short of the frame is an upscale on that axis, whatever the
+    /// fit mode does with the other one.
+    #[test]
+    fn only_an_image_short_of_the_frame_on_some_axis_is_upscaled() {
+        assert!(!needs_upscaling((1920, 1080), (1920, 1080)));
+        assert!(!needs_upscaling((3840, 2160), (1920, 1080)));
+        assert!(needs_upscaling((1920, 1079), (1920, 1080)));
+        assert!(needs_upscaling((1919, 1080), (1920, 1080)));
+        assert!(
+            needs_upscaling((4000, 100), (1920, 1080)),
+            "a wide sliver is still stretched vertically",
+        );
     }
 
     /// `--seed` fixes the number; `auto` stands for one nobody chose but which

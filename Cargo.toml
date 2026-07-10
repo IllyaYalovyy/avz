@@ -21,6 +21,10 @@ clap = { version = "4.5", features = ["derive"] }
 # machines (AGENTS.md, determinism).
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+# Progress bars, in `avz-cli` only: `avz-core` reports progress through the
+# Progress callback trait and never touches a terminal (AGENTS.md, core/cli
+# split), which `scripts/quality.d/10-core-is-ui-agnostic.sh` enforces.
+indicatif = "0.18"
 lofty = "0.22"
 pollster = "0.4"
 rayon = "1.11"

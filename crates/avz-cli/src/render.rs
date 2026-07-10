@@ -2,27 +2,25 @@
 //!
 //! Everything a render needs from the user is resolved here — the output path,
 //! the config layers, the adapter — and everything the render has to say comes
-//! back through the [`Progress`] trait, because `avz-core` never prints
-//! (`AGENTS.md`, core/cli split).
-//!
-//! The progress bar with frame count, fps, and ETA arrives in RFC-001 Step 21.
-//! Until then phases are logged and the one actionable warning is printed.
+//! back through the [`Progress`](avz_core::Progress) trait, because `avz-core`
+//! never prints (`AGENTS.md`, core/cli split). [`Ui`] is what draws it.
 
 use std::path::{Path, PathBuf};
 
-use avz_core::config::{BackgroundLayer, ConfigLayer, Sources, TextLayer, VisualLayer};
+use avz_core::Error;
+use avz_core::Progress as _;
+use avz_core::config::{BackgroundLayer, ConfigLayer, Resolution, Sources, TextLayer, VisualLayer};
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
-use avz_core::render::AdapterKind;
-use avz_core::{Error, Phase, Progress};
 
 use crate::cli::RenderArgs;
+use crate::progress::Ui;
 
 /// The extension every render produces.
 const OUTPUT_EXTENSION: &str = "mp4";
 
 /// Render `args.input`, reporting progress to the terminal.
-pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
+pub fn run(args: &RenderArgs, ui: &Ui) -> anyhow::Result<()> {
     // Before analysis, before the GPU, before a single frame: a render that
     // cannot be encoded should fail in the first second, not the last one
     // (`VISION.md` §5.4).
@@ -42,7 +40,7 @@ pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
 
     // `VISION.md` §5.5: CLI flags > `--set` > `--config` > preset defaults >
     // built-in defaults. `Sources` is where that order is written down.
-    let config = Sources {
+    let sources = Sources {
         sample_defaults: match args.sample {
             Some(_) => ConfigLayer::for_sample(),
             None => ConfigLayer::default(),
@@ -54,10 +52,14 @@ pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
         set: ConfigLayer::from_set_assignments(&args.set)?,
         cli: cli_layer(args),
         ..Sources::default()
-    }
-    .resolve()?;
+    };
+    let reduced_for_sample = sample_resolution_is_a_default(args, &sources);
+    let config = sources.resolve()?;
 
-    let progress = Terminal { quiet };
+    if reduced_for_sample {
+        ui.warn(&sample_resolution_warning(config.output.resolution));
+    }
+
     let summary = pipeline::render(
         &RenderRequest {
             input: &args.input,
@@ -67,14 +69,36 @@ pub fn run(args: &RenderArgs, quiet: bool) -> anyhow::Result<()> {
             sample: args.sample,
             ffmpeg: &ffmpeg,
         },
-        &progress,
+        ui,
     )?;
 
-    if !quiet {
-        println!("{}", describe(&summary));
-    }
+    ui.report(&describe(&summary));
 
     Ok(())
+}
+
+/// Whether the frame size about to be rendered is the one `--sample` picked
+/// rather than one the user asked for.
+///
+/// No CLI flag reaches `output.resolution`, so the only layers that can outrank
+/// the sample default are the config file and `--set`.
+fn sample_resolution_is_a_default(args: &RenderArgs, sources: &Sources) -> bool {
+    args.sample.is_some()
+        && sources.file.output.resolution.is_none()
+        && sources.set.output.resolution.is_none()
+}
+
+/// What to say when `--sample` quietly halves the frame size.
+///
+/// "Fast iteration" (`VISION.md` §3) is the whole point of the reduced default,
+/// and a preview the user believes is full-size is a preview they will judge the
+/// wrong picture by.
+fn sample_resolution_warning(resolution: Resolution) -> String {
+    format!(
+        "`--sample` renders at {resolution} rather than full size, so an excerpt comes \
+         back in seconds — pass `--set output.resolution=1080p`, or set \
+         `output.resolution` in a config file, to preview at the size you will ship",
+    )
 }
 
 /// The settings named by individual CLI flags — the top of the precedence chain.
@@ -137,74 +161,11 @@ fn describe(summary: &RenderSummary) -> String {
     )
 }
 
-/// The one line that says who is doing the drawing.
-///
-/// Printed before the first frame, because hardware-versus-software is the
-/// difference between a render that takes minutes and one that takes the
-/// evening (`VISION.md` §7) — the user should learn which they got at the
-/// start, not from the clock.
-fn announce(kind: AdapterKind, name: &str) -> String {
-    match kind {
-        AdapterKind::Hardware => format!("rendering on {name} — hardware GPU"),
-        AdapterKind::Software => {
-            format!("rendering on {name} — software rasterizer, no GPU")
-        }
-    }
-}
-
-/// [`Progress`] rendered as terminal output.
-///
-/// Phases go to `tracing`, which already writes to stderr and already honours
-/// `--verbose` and `--quiet`. Warnings are printed directly, because a warning
-/// the user must act on should not depend on a log level.
-#[derive(Debug)]
-struct Terminal {
-    quiet: bool,
-}
-
-impl Terminal {
-    /// Whether a warning reaches the user.
-    fn shows_warnings(&self) -> bool {
-        !self.quiet
-    }
-
-    /// Whether the adapter announcement reaches the user. It is information,
-    /// not an error, so `--quiet` silences it.
-    fn shows_adapter(&self) -> bool {
-        !self.quiet
-    }
-}
-
-impl Progress for Terminal {
-    fn phase_started(&self, phase: Phase, total: Option<u64>) {
-        match total {
-            Some(total) => tracing::info!(units = total, "{}", phase.label()),
-            None => tracing::info!("{}", phase.label()),
-        }
-    }
-
-    /// Deliberately silent: a per-frame log line would outnumber the frames it
-    /// describes. The progress bar that consumes this lands in RFC-001 Step 21.
-    fn advance(&self, _phase: Phase, _units: u64) {}
-
-    fn phase_finished(&self, _phase: Phase) {}
-
-    fn warn(&self, message: &str) {
-        if self.shows_warnings() {
-            eprintln!("warning: {message}");
-        }
-    }
-
-    fn adapter_selected(&self, kind: AdapterKind, name: &str) {
-        if self.shows_adapter() {
-            println!("{}", announce(kind, name));
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::fs;
+
+    use avz_core::render::AdapterKind;
 
     use super::*;
 
@@ -337,37 +298,62 @@ mod tests {
         );
     }
 
-    /// `--quiet` suppresses everything but errors (`VISION.md` §3), and a
-    /// warning is not an error.
+    /// A render with no `--sample` draws at whatever resolution was configured,
+    /// and there is nothing to warn about.
     #[test]
-    fn only_a_loud_render_shows_warnings() {
-        assert!(Terminal { quiet: false }.shows_warnings());
-        assert!(!Terminal { quiet: true }.shows_warnings());
+    fn a_full_render_never_warns_about_the_sample_resolution() {
+        assert!(!sample_resolution_is_a_default(
+            &render_args(&[]),
+            &Sources::default()
+        ));
     }
 
-    /// The announcement names the adapter and says plainly which side of the
-    /// hardware/software line it falls on — that distinction is minutes versus
-    /// hours on a long render (`VISION.md` §7).
+    /// `--sample` alone drops to 720p, and the user did not ask for that.
     #[test]
-    fn a_hardware_adapter_is_announced_as_a_real_gpu() {
-        assert_eq!(
-            announce(AdapterKind::Hardware, "AMD Radeon 780M"),
-            "rendering on AMD Radeon 780M — hardware GPU"
+    fn a_sample_render_that_names_no_resolution_warns_that_it_was_reduced() {
+        assert!(sample_resolution_is_a_default(
+            &render_args(&["--sample", "30s"]),
+            &Sources::default()
+        ));
+    }
+
+    /// A resolution the user wrote down outranks the sample default, so nothing
+    /// was reduced and nothing needs saying — from either layer that can say it.
+    #[test]
+    fn a_configured_resolution_silences_the_sample_resolution_warning() {
+        let args = render_args(&["--sample", "30s"]);
+        let resolution: Resolution = "1080p".parse().expect("a legal resolution");
+
+        let from_file = Sources {
+            file: ConfigLayer {
+                output: avz_core::config::OutputLayer {
+                    resolution: Some(resolution),
+                    ..Default::default()
+                },
+                ..ConfigLayer::default()
+            },
+            ..Sources::default()
+        };
+        assert!(!sample_resolution_is_a_default(&args, &from_file));
+
+        let from_set = Sources {
+            set: ConfigLayer::from_set_assignments(&["output.resolution=1080p".to_owned()])
+                .expect("a legal `--set`"),
+            ..Sources::default()
+        };
+        assert!(!sample_resolution_is_a_default(&args, &from_set));
+    }
+
+    /// The warning names the size it dropped to and the key that undoes it.
+    #[test]
+    fn the_sample_resolution_warning_names_the_size_and_the_way_out() {
+        let warning = sample_resolution_warning("1280x720".parse().expect("a legal resolution"));
+
+        assert!(warning.contains("1280x720"), "{warning}");
+        assert!(warning.contains("output.resolution"), "{warning}");
+        assert!(
+            warning.contains('—'),
+            "a warning names the consequence and the action: {warning}",
         );
-    }
-
-    #[test]
-    fn a_software_adapter_is_announced_as_cpu_emulation() {
-        assert_eq!(
-            announce(AdapterKind::Software, "llvmpipe (LLVM 19.1.7, 256 bits)"),
-            "rendering on llvmpipe (LLVM 19.1.7, 256 bits) — software rasterizer, no GPU"
-        );
-    }
-
-    /// The announcement is information, not an error, so `--quiet` silences it.
-    #[test]
-    fn only_a_loud_render_announces_its_adapter() {
-        assert!(Terminal { quiet: false }.shows_adapter());
-        assert!(!Terminal { quiet: true }.shows_adapter());
     }
 }

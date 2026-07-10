@@ -175,9 +175,11 @@ fn render_writes_a_sampled_mp4_next_to_the_input() {
     assert_eq!(probe(&output, "a", "codec_name"), "mp3");
 }
 
-/// `--quiet` suppresses everything but errors (`VISION.md` §3).
+/// `--quiet` suppresses everything but errors (`VISION.md` §3): no progress, no
+/// adapter announcement, no summary — and, though `--sample` drops to 720p, no
+/// warning either.
 #[test]
-fn a_quiet_render_prints_nothing_on_success() {
+fn quiet_emits_nothing_on_success() {
     let dir = tempfile::tempdir().expect("tempdir");
     let song = dir.path().join("song.mp3");
     fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
@@ -188,9 +190,102 @@ fn a_quiet_render_prints_nothing_on_success() {
         .args(["--sample", "100ms", "--adapter", "software", "--quiet"])
         .assert()
         .success()
-        .stdout("");
+        .stdout("")
+        .stderr("");
 
     assert!(dir.path().join("song.mp4").is_file());
+}
+
+/// `--verbose` is the diagnostic mode `VISION.md` §8 promises: the adapter that
+/// was chosen and the full ffmpeg command line, so a render that produced the
+/// wrong file can be reproduced by hand.
+#[test]
+fn verbose_logs_adapter_and_ffmpeg_cmdline() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    avz()
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "100ms", "--adapter", "software", "--verbose"])
+        .assert()
+        .success()
+        // The adapter, by name and by kind.
+        .stderr(contains("selected adapter"))
+        .stderr(contains("llvmpipe"))
+        // The ffmpeg command line, argument for argument.
+        .stderr(contains("ffmpeg started"))
+        .stderr(contains("rawvideo"))
+        .stderr(contains("-pix_fmt"))
+        .stderr(contains("libx264"))
+        // Per-phase timings.
+        .stderr(contains("phase finished"));
+}
+
+/// stderr is a pipe here, as it is in CI and under `avz ... 2>log`. A bar's
+/// carriage returns would pile up into a wall of redraw garbage, so the same
+/// information degrades to lines (`VISION.md` §3, non-TTY).
+#[test]
+fn a_piped_render_reports_progress_as_lines_rather_than_a_bar() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    let assertion = avz()
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "1s", "--adapter", "software"])
+        .assert()
+        .success()
+        .stderr(contains("analyzing"))
+        .stderr(contains("rendering 30 frames"))
+        .stderr(contains("rendering 50% (15/30)"))
+        .stderr(contains("rendering 100% (30/30)"))
+        .stderr(contains("finalizing"));
+
+    let stderr = String::from_utf8_lossy(&assertion.get_output().stderr).into_owned();
+    assert!(
+        !stderr.contains('\r'),
+        "a redrawn progress bar reached a pipe: {stderr:?}",
+    );
+}
+
+/// The reduced `--sample` resolution is a default nobody typed. A user judging a
+/// preview must know they are not looking at what will ship.
+#[test]
+fn a_sample_render_says_it_dropped_to_a_reduced_resolution() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    avz()
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "100ms", "--adapter", "software"])
+        .assert()
+        .success()
+        .stderr(contains("warning:"))
+        .stderr(contains("1280x720"))
+        .stderr(contains("output.resolution"));
+}
+
+/// A resolution the user wrote down is the resolution they get, and there is
+/// nothing left to warn about.
+#[test]
+fn a_sample_render_at_a_configured_resolution_warns_about_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    avz()
+        .arg("render")
+        .arg(&song)
+        .args(["--sample", "100ms", "--adapter", "software"])
+        .args(["--set", "output.resolution=320x180"])
+        .assert()
+        .success()
+        .stderr(contains("warning:").not());
 }
 
 /// Ask `ffprobe` for one entry of every `kind` (`v` or `a`) stream.

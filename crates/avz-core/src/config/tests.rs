@@ -196,15 +196,70 @@ fn unknown_key_in_a_config_file_names_the_file_and_the_line() {
     assert!(message.contains("did you mean `fps`"), "{message}");
 }
 
+/// `VISION.md` §8 spends exit 3 on "input file problems", which in a tool whose
+/// subject is one mp3 means the song. `--config` is an argument, and a batch loop
+/// must be able to tell "skip this broken song" (3) from "my `--config` path is
+/// wrong and every song will fail" (2).
 #[test]
-fn a_missing_config_file_is_an_input_problem_not_a_config_problem() {
+fn a_missing_config_file_is_a_config_problem_not_an_input_problem() {
     let err = ConfigLayer::from_file(Path::new("/nonexistent/avz-does-not-exist.toml"))
         .expect_err("rejected");
 
     assert!(
-        matches!(err, Error::Input(_)),
-        "expected an input error, got {err:?}"
+        matches!(err, Error::Config(_)),
+        "expected a config error, got {err:?}"
     );
+}
+
+/// `No such file or directory (os error 2)` is what the operating system calls
+/// it. A user cannot act on an errno, and the path it happened to is the only
+/// part they can fix.
+#[test]
+fn an_unreadable_config_file_is_named_in_a_sentence_not_an_errno() {
+    let err = ConfigLayer::from_file(Path::new("/nonexistent/avz-does-not-exist.toml"))
+        .expect_err("rejected");
+    let message = err.to_string();
+
+    assert!(
+        message.contains("avz-does-not-exist.toml"),
+        "must name the file: {message}"
+    );
+    assert!(
+        message.contains("no such file"),
+        "must say what is wrong: {message}"
+    );
+    assert!(
+        !message.contains("os error"),
+        "a bare io::Error reached the user: {message}"
+    );
+}
+
+/// A config file that exists and cannot be opened is still the user's argument,
+/// and the reason is still a sentence.
+#[test]
+fn a_config_file_that_cannot_be_opened_says_why_without_an_errno() {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let path = dir.path().join("locked.toml");
+        std::fs::write(&path, "[output]\nfps = 30\n").expect("write");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).expect("chmod");
+
+        // Root reads anything, so the permission bit proves nothing there.
+        if std::fs::read_to_string(&path).is_ok() {
+            return;
+        }
+
+        let err = ConfigLayer::from_file(&path).expect_err("rejected");
+        let message = err.to_string();
+
+        assert!(matches!(err, Error::Config(_)), "got {err:?}");
+        assert!(message.contains("locked.toml"), "{message}");
+        assert!(message.contains("permission denied"), "{message}");
+        assert!(!message.contains("os error"), "{message}");
+    }
 }
 
 #[test]

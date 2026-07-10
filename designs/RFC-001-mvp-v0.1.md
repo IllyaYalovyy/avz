@@ -397,7 +397,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 **M5 — Polish & release v0.1** *(accept: an album batch-renders unattended)*
 
-- [ ] **Step 21** - Progress bars, actionable warnings, error-message and exit-code
+- [x] **Step 21** - Progress bars, actionable warnings, error-message and exit-code
   audit *(prerequisite: Step 9)*
 - [ ] **Step 22** - `avz config --example`, `--seed`/default seed, `--quality`
   *(prerequisite: Steps 15, 16)*

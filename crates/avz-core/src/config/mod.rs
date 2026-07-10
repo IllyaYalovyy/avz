@@ -303,11 +303,12 @@ impl ConfigLayer {
 
     /// Read and parse a `--config` file.
     ///
-    /// An unreadable file is an [`Error::Input`] (exit 3); a readable file with
-    /// bad contents is an [`Error::Config`] (exit 2).
+    /// Both halves are an [`Error::Config`] (exit 2), because both are the
+    /// user's arguments. Exit 3 belongs to the song: `VISION.md` §8 spends it on
+    /// "input file problems", and a batch loop has to tell "skip this broken
+    /// song" from "the `--config` path is wrong and every song will fail".
     pub fn from_file(path: &Path) -> Result<Self> {
-        let source = std::fs::read_to_string(path)
-            .map_err(|err| Error::Input(format!("{}: {err}", path.display())))?;
+        let source = std::fs::read_to_string(path).map_err(|err| unreadable(path, &err))?;
 
         Self::from_toml_str(&source).map_err(|err| match err {
             Error::Config(message) => Error::Config(format!("{}:\n{message}", path.display())),
@@ -598,6 +599,22 @@ fn unit_interval(key: &str, value: f64) -> Result<f32> {
         )));
     }
     Ok(value as f32)
+}
+
+/// Say why a `--config` file could not be read, in words rather than in errnos.
+///
+/// `No such file or directory (os error 2)` is what the operating system calls
+/// it; the path is the only part of that the user can fix.
+fn unreadable(path: &Path, err: &std::io::Error) -> Error {
+    use std::io::ErrorKind as Io;
+
+    let path = path.display();
+
+    Error::Config(match err.kind() {
+        Io::NotFound => format!("{path}: no such file"),
+        Io::PermissionDenied => format!("{path}: permission denied"),
+        _ => format!("{path}: cannot be read: {err}"),
+    })
 }
 
 /// Turn a `toml` deserialization failure into a config error, appending a
