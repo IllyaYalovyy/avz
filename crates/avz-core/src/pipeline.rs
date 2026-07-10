@@ -85,6 +85,7 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     progress.phase_finished(Phase::Analyzing);
 
     let gpu = Gpu::new(request.adapter)?;
+    progress.adapter_selected(gpu.kind(), gpu.adapter_name());
     if gpu.fell_back_to_software() {
         progress.warn(SOFTWARE_FALLBACK_WARNING);
     }

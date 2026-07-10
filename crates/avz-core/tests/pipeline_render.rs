@@ -211,6 +211,7 @@ enum Event {
     Advanced(Phase, u64),
     Finished(Phase),
     Warned(String),
+    AdapterSelected(AdapterKind, String),
 }
 
 impl Recorder {
@@ -233,6 +234,16 @@ impl Recorder {
             .into_iter()
             .filter_map(|event| match event {
                 Event::Warned(message) => Some(message),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn adapters(&self) -> Vec<(AdapterKind, String)> {
+        self.events()
+            .into_iter()
+            .filter_map(|event| match event {
+                Event::AdapterSelected(kind, name) => Some((kind, name)),
                 _ => None,
             })
             .collect()
@@ -261,6 +272,10 @@ impl Progress for Recorder {
 
     fn warn(&self, message: &str) {
         self.push(Event::Warned(message.to_owned()));
+    }
+
+    fn adapter_selected(&self, kind: AdapterKind, name: &str) {
+        self.push(Event::AdapterSelected(kind, name.to_owned()));
     }
 }
 
@@ -393,6 +408,37 @@ fn progress_reports_the_three_phases_in_order_with_a_frame_total() {
         .filter(|event| **event == Event::Advanced(Phase::Rendering, 1))
         .count();
     assert_eq!(advances, 15, "every frame advances the bar exactly once");
+}
+
+/// Every render says which adapter is doing the work — kind and the driver's
+/// own name for it — exactly once, so the user knows whether a GPU took the
+/// job or lavapipe is emulating one before the first frame lands, not after
+/// the render has quietly taken the whole evening (`VISION.md` §7).
+#[test]
+fn every_render_announces_the_one_adapter_doing_the_work() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, _) = output_paths(dir.path());
+    let recorder = Recorder::default();
+
+    render_fixture(&ffmpeg, &output, Some(sample("0s..0.2s")), &recorder).expect("renders");
+
+    let adapters = recorder.adapters();
+    assert_eq!(
+        adapters.len(),
+        1,
+        "announced once, not per frame: {adapters:?}"
+    );
+    let (kind, name) = &adapters[0];
+    assert_eq!(
+        *kind,
+        AdapterKind::Software,
+        "this render asked for lavapipe by name"
+    );
+    assert!(
+        !name.is_empty(),
+        "the driver's own adapter name, not a blank"
+    );
 }
 
 /// `--adapter software` was asked for by name, so there is nothing to warn about
