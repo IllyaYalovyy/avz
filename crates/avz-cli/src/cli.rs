@@ -75,6 +75,14 @@ pub struct RenderArgs {
     #[arg(long, value_name = "NAME|#HEX,#HEX")]
     pub palette: Option<Palette>,
 
+    /// A static image to composite beneath the visuals.
+    ///
+    /// Fitted to the frame by `background.fit` (`cover` by default), and
+    /// optionally blurred and darkened so the visuals read on top:
+    /// `--set background.blur=6 --set background.darken=0.35`.
+    #[arg(long, value_name = "FILE")]
+    pub bg: Option<PathBuf>,
+
     /// A TOML config file. See `avz config --example` for a documented template.
     #[arg(long, value_name = "FILE")]
     pub config: Option<PathBuf>,

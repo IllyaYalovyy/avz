@@ -81,9 +81,9 @@ pub struct Background {
     pub source: Option<BackgroundSource>,
     /// How the source is fitted to the frame.
     pub fit: Fit,
-    /// Gaussian blur radius in pixels.
+    /// Gaussian blur, as a standard deviation in pixels of the output frame.
     pub blur: f32,
-    /// How far to darken the background, 0..=1.
+    /// How much of the background's light to take away, 0..=1.
     pub darken: f32,
 }
 

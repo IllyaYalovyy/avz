@@ -21,9 +21,9 @@ request that does not serve it goes to the backlog.
 pipeline — decode, full FFT analysis with envelopes and onsets, the `pulse`
 preset on the GPU, ffmpeg encode with the original audio muxed untouched — and
 `avz probe` reports tags. `avz presets` lists what ships and prints a preset's
-parameter schema; `--config`, `--set`, and `--palette` configure it. Text and
-background layers arrive in M4, so `--preset` and `--bg` below are not flags
-yet, and `avz config` still exits with "not implemented yet".
+parameter schema; `--config`, `--set`, `--palette`, and `--bg` configure it. The
+text card arrives later in M4, so `--preset` below is not a flag yet, and
+`avz config` still exits with "not implemented yet".
 
 **Palettes.** `--palette` takes a built-in name — `ember`, `glacier`, `verdant`,
 `mono`, or `carpathian` — or two to eight inline hex colors, which avz resamples
@@ -33,6 +33,19 @@ in Oklab onto the five slots a shader reads:
 avz render song.mp3 --palette glacier
 avz render song.mp3 --palette '#1a1a2e,#e94560,#ffd93d'
 ```
+
+**Background image.** `--bg` composites a png or jpeg beneath the visuals. It is
+fitted by `background.fit` — `cover` (the default) crops, `contain` letterboxes
+onto the palette gradient, `stretch` distorts — and `background.blur` and
+`background.darken` push it back so the visuals read on top:
+
+```bash
+avz render song.mp3 --bg art/forest.png \
+      --set background.fit=contain --set background.blur=6 --set background.darken=0.35
+```
+
+A looped background video is planned but not built; `background.video` is
+refused with a message that says so.
 
 ## Requirements
 

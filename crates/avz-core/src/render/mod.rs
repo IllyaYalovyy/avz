@@ -8,7 +8,8 @@
 //! A render owns one [`Offscreen`] frame, one [`Layer`] per layer that exists,
 //! and one [`Compositor`] that flattens them into it. A preset draws light and
 //! coverage into the visualizer layer and never sees what is beneath it; the
-//! [`Backdrop`] under it is the palette rather than the black the presets used to
+//! [`Background`] under it is the palette [`Backdrop`], optionally with a fitted,
+//! blurred, and darkened image over it, rather than the black the presets used to
 //! paint for themselves.
 //!
 //! Animation time is always `frame_index / fps`, never wall clock. Readback
@@ -30,7 +31,7 @@ pub mod readback;
 pub mod schema;
 
 pub use adapter::{AdapterChoice, AdapterKind};
-pub use background::Backdrop;
+pub use background::{Backdrop, Background};
 pub use compositor::Compositor;
 pub use feedback::Feedback;
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};

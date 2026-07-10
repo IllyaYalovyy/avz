@@ -23,7 +23,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use avz_core::analysis::{self, FeatureTimeline};
-use avz_core::config::{Config, Palette, SampleRange};
+use avz_core::config::{BackgroundSource, Config, Fit, Palette, SampleRange};
 use avz_core::encode::{DEFAULT_PROGRAM, Ffmpeg, preflight};
 use avz_core::pipeline::{RenderRequest, RenderSummary, render};
 use avz_core::render::{AdapterChoice, AdapterKind};
@@ -868,4 +868,196 @@ fn probe(file: &Path, kind: &str, entry: &str) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
+}
+
+/// A solid-color PNG, for the background-image layer.
+fn solid_png(dir: &Path, name: &str, color: [u8; 4]) -> PathBuf {
+    let path = dir.join(name);
+    let mut png = image::RgbaImage::new(8, 8);
+    for pixel in png.pixels_mut() {
+        *pixel = image::Rgba(color);
+    }
+    png.save(&path).expect("write the background png");
+    path
+}
+
+/// Mean value of one channel over a frame, 0..=255.
+fn mean_channel(frame: &[u8], channel: usize) -> f64 {
+    let total: f64 = frame
+        .chunks_exact(4)
+        .map(|pixel| f64::from(pixel[channel]))
+        .sum();
+    total / f64::from(WIDTH * HEIGHT)
+}
+
+/// `--bg` is a layer, not a suggestion: the image the user named must be under
+/// every rendered frame. Compared against the same render without it, because
+/// `pulse` draws over the background and no single pixel is guaranteed to be
+/// the image alone.
+#[test]
+fn a_background_image_reaches_the_rendered_frames() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let with_image = dir.path().join("with.mp4");
+    let without_image = dir.path().join("without.mp4");
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Image(solid_png(
+        dir.path(),
+        "green.png",
+        [0x00, 0xff, 0x00, 0xff],
+    )));
+    config.background.fit = Fit::Stretch;
+
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &with_image,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect("the fixture renders over a background image");
+
+    config.background.source = None;
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &without_image,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect("the fixture renders over the palette backdrop");
+
+    let green = recorded_frames(&with_image);
+    let backdrop = recorded_frames(&without_image);
+    assert_eq!(green.len(), 6, "0.2 s at 30 fps");
+
+    for (index, frame) in green.iter().enumerate() {
+        assert!(
+            mean_channel(frame, 1) > 200.0,
+            "frame {index} should be mostly the green background, got {}",
+            mean_channel(frame, 1),
+        );
+        assert!(
+            mean_channel(frame, 1) > mean_channel(&backdrop[index], 1) + 100.0,
+            "frame {index} is no greener than the render with no image at all",
+        );
+    }
+}
+
+/// `darken` is what makes the visuals read on top of a bright photograph
+/// (`VISION.md` §5.3). It reaches the pixels, and it takes light away.
+#[test]
+fn darkening_the_background_dims_the_rendered_frames() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let bright = dir.path().join("bright.mp4");
+    let dim = dir.path().join("dim.mp4");
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Image(solid_png(
+        dir.path(),
+        "white.png",
+        [0xff, 0xff, 0xff, 0xff],
+    )));
+    config.background.fit = Fit::Stretch;
+
+    let _device = one_device_at_a_time();
+    let render_to = |output: &Path, config: &Config| {
+        render(
+            &RenderRequest {
+                input: &fixture_mp3(),
+                output,
+                config,
+                adapter: AdapterChoice::Software,
+                sample: Some(sample("0s..0.1s")),
+                ffmpeg: &ffmpeg,
+            },
+            &NoopProgress,
+        )
+        .expect("the fixture renders");
+    };
+
+    render_to(&bright, &config);
+    config.background.darken = 0.75;
+    render_to(&dim, &config);
+
+    let bright = recorded_frames(&bright);
+    let dim = recorded_frames(&dim);
+
+    for (index, frame) in dim.iter().enumerate() {
+        assert!(
+            mean_luma(frame) < mean_luma(&bright[index]),
+            "frame {index} was not dimmed by `background.darken`",
+        );
+    }
+}
+
+/// A background image that does not exist costs a millisecond, not a decode —
+/// the same promise `visual.preset` and `visual.palette` already keep.
+#[test]
+fn a_missing_background_image_fails_before_the_song_is_even_decoded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Image(dir.path().join("forest.png")));
+
+    let _device = one_device_at_a_time();
+    let err = render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: None,
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect_err("there is no such background image");
+
+    assert!(matches!(err, Error::Input(_)), "got {err:?}");
+    assert!(err.to_string().contains("forest.png"), "{err}");
+    assert!(!output.exists() && !part.exists(), "nothing was written");
+}
+
+/// The looped background video is deferred (RFC-001 NG2). A config that asks for
+/// one is refused where the user can act on it, not ignored.
+#[test]
+fn a_background_video_is_refused_before_the_song_is_even_decoded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Video("loops/smoke.mp4".into()));
+
+    let _device = one_device_at_a_time();
+    let err = render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: None,
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect_err("the background video layer does not exist yet");
+
+    assert!(matches!(err, Error::Config(_)), "got {err:?}");
+    assert!(err.to_string().contains("smoke.mp4"), "{err}");
+    assert!(!output.exists() && !part.exists(), "nothing was written");
 }
