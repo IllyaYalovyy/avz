@@ -1,0 +1,5 @@
+# Golden hashes of the text card, set in the bundled font, over the `ember` gradient.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+39 cac8d8a690ab11792f237d2bafcdfbfcb939f59889d0d23995f690f0782dec19
+48 35e84b0c4238646fcf03f52c16469b8d37620516ce9d38baba1bd45e56d82153

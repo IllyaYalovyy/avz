@@ -1,5 +1,5 @@
-# Golden hashes of `pulse` frame 10 under every built-in palette: sha256 of the RGBA bytes of a
-# 320x180 software-adapter render, seed 1337, synthetic features.
+# Golden hashes of `pulse` frame 10, seed 1337, under every built-in palette.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
 # Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
 ember 53c5b698e3df5f1652383af65a241c0c14dfcf2919029edbe866de90eca3578e
 glacier f9756bcea85444a552646c00217a4a7dd9aafd6b714a3bbdb01180ec3d93e639

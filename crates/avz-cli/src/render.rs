@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use avz_core::config::{BackgroundLayer, ConfigLayer, Sources, VisualLayer};
+use avz_core::config::{BackgroundLayer, ConfigLayer, Sources, TextLayer, VisualLayer};
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
 use avz_core::render::AdapterKind;
@@ -91,6 +91,14 @@ fn cli_layer(args: &RenderArgs) -> ConfigLayer {
         background: BackgroundLayer {
             image: args.bg.clone(),
             ..BackgroundLayer::default()
+        },
+        text: TextLayer {
+            // `--no-text` disables the card; its absence says nothing, or every
+            // render would overrule a config file that enabled one.
+            enabled: args.no_text.then_some(false),
+            title: args.title.clone(),
+            artist: args.artist.clone(),
+            ..TextLayer::default()
         },
         ..ConfigLayer::default()
     }
@@ -238,6 +246,26 @@ mod tests {
         assert_eq!(
             layer.background.video, None,
             "`--bg` names an image; the video layer is RFC-001 NG2",
+        );
+    }
+
+    /// `--title`, `--artist`, and `--no-text` are the `VISION.md` §5.2 overrides,
+    /// and they outrank the ID3 tags because they outrank the config file that
+    /// would otherwise have named them.
+    #[test]
+    fn the_text_flags_reach_the_cli_config_layer() {
+        let layer = cli_layer(&render_args(&["--title", "Cold Design", "--artist", "avz"]));
+
+        assert_eq!(layer.text.title.as_deref(), Some("Cold Design"));
+        assert_eq!(layer.text.artist.as_deref(), Some("avz"));
+        assert_eq!(
+            layer.text.enabled, None,
+            "naming a card must not also decide whether cards are drawn"
+        );
+
+        assert_eq!(
+            cli_layer(&render_args(&["--no-text"])).text.enabled,
+            Some(false)
         );
     }
 

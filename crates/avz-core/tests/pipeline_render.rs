@@ -23,7 +23,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use avz_core::analysis::{self, FeatureTimeline};
-use avz_core::config::{BackgroundSource, Config, Fit, Palette, SampleRange};
+use avz_core::config::{BackgroundSource, Config, Fit, FontChoice, Palette, SampleRange};
 use avz_core::encode::{DEFAULT_PROGRAM, Ffmpeg, preflight};
 use avz_core::pipeline::{RenderRequest, RenderSummary, render};
 use avz_core::render::{AdapterChoice, AdapterKind};
@@ -41,10 +41,16 @@ const FRAME_BYTES: usize = (WIDTH * HEIGHT * 4) as usize;
 /// The CC0 fixture: 5 s of a 60 Hz kick decaying every 500 ms under a 1 kHz
 /// tone, so loudness rises and falls several times a second.
 fn fixture_mp3() -> PathBuf {
+    fixture("tone-tagged.mp3")
+}
+
+/// A committed CC0 fixture. See `assets/fixtures/README.md`.
+fn fixture(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../assets/fixtures/tone-tagged.mp3")
+        .join("../../assets/fixtures")
+        .join(name)
         .canonicalize()
-        .expect("the CC0 fixture is committed at assets/fixtures/tone-tagged.mp3")
+        .unwrap_or_else(|err| panic!("the CC0 fixture {name} is committed: {err}"))
 }
 
 fn config() -> Config {
@@ -1029,6 +1035,243 @@ fn a_missing_background_image_fails_before_the_song_is_even_decoded() {
 
     assert!(matches!(err, Error::Input(_)), "got {err:?}");
     assert!(err.to_string().contains("forest.png"), "{err}");
+    assert!(!output.exists() && !part.exists(), "nothing was written");
+}
+
+/// Render `input` with `config`, on lavapipe, into `ffmpeg`.
+fn render_song(
+    ffmpeg: &Ffmpeg,
+    input: &Path,
+    output: &Path,
+    config: &Config,
+    sample: &str,
+    progress: &dyn Progress,
+) -> Result<RenderSummary, Error> {
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input,
+            output,
+            config,
+            adapter: AdapterChoice::Software,
+            sample: Some(self::sample(sample)),
+            ffmpeg,
+        },
+        progress,
+    )
+}
+
+/// The config a text-card test renders with: type large enough that a 320x180
+/// frame carries readable ink. The card is fully up by `in_at + fade` = 1.6 s.
+fn text_config() -> Config {
+    let mut config = config();
+    config.text.size = 0.16;
+    config
+}
+
+/// How many pixels of `frame` differ from `other`.
+fn different_pixels(frame: &[u8], other: &[u8]) -> usize {
+    frame
+        .chunks_exact(4)
+        .zip(other.chunks_exact(4))
+        .filter(|(a, b)| a != b)
+        .count()
+}
+
+/// The M4 promise on pixels: the card the ID3 tags name is drawn over the
+/// visuals, and it is drawn *because* text is enabled.
+///
+/// Frames at 1.6 s are past `in_at + fade`, so the card is at full opacity.
+/// Nothing else in the suite would notice a card that resolved, rasterized, and
+/// never reached the compositor.
+#[test]
+fn the_text_card_from_id3_reaches_the_rendered_frames() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (with_card, without_card) = (dir.path().join("with.mp4"), dir.path().join("without.mp4"));
+
+    let mut config = text_config();
+    render_song(
+        &ffmpeg,
+        &fixture_mp3(),
+        &with_card,
+        &config,
+        "1.6s..1.7s",
+        &NoopProgress,
+    )
+    .expect("the tagged fixture renders with its card");
+
+    config.text.enabled = false;
+    render_song(
+        &ffmpeg,
+        &fixture_mp3(),
+        &without_card,
+        &config,
+        "1.6s..1.7s",
+        &NoopProgress,
+    )
+    .expect("and renders without it");
+
+    let carded = recorded_frames(&with_card);
+    let bare = recorded_frames(&without_card);
+    assert_eq!(carded.len(), 3, "0.1 s at 30 fps");
+
+    for (index, frame) in carded.iter().enumerate() {
+        let inked = different_pixels(frame, &bare[index]);
+        assert!(
+            inked > 100,
+            "frame {index} carries only {inked} pixels of text card; the card \
+             never reached the compositor",
+        );
+    }
+}
+
+/// `--no-text` and `[text] enabled = false` draw no card, and the frames are the
+/// frames of a render that never had one.
+#[test]
+fn a_disabled_card_leaves_the_frame_exactly_as_it_found_it() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (disabled, untagged) = (dir.path().join("off.mp4"), dir.path().join("bare.mp4"));
+
+    let mut config = text_config();
+    config.text.enabled = false;
+    render_song(
+        &ffmpeg,
+        &fixture_mp3(),
+        &disabled,
+        &config,
+        "1.6s..1.7s",
+        &NoopProgress,
+    )
+    .expect("renders");
+
+    // The same seconds of the same tones with no tags to draw: also no card, and
+    // so the same frames, down to the byte.
+    config.text.enabled = true;
+    render_song(
+        &ffmpeg,
+        &fixture("tone-untagged.mp3"),
+        &untagged,
+        &config,
+        "1.6s..1.7s",
+        &NoopProgress,
+    )
+    .expect("renders");
+
+    assert_eq!(
+        recorded_frames(&disabled),
+        recorded_frames(&untagged),
+        "a skipped card is not the same as no card at all",
+    );
+}
+
+/// The risk-matrix row: both tags missing and no overrides. The render succeeds,
+/// the card is skipped, and the user is told what to do about it.
+#[test]
+fn missing_tags_warns_and_skips_card() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, _) = output_paths(dir.path());
+    let recorder = Recorder::default();
+
+    let summary = render_song(
+        &ffmpeg,
+        &fixture("tone-untagged.mp3"),
+        &output,
+        &text_config(),
+        "1.6s..1.7s",
+        &recorder,
+    )
+    .expect("an untagged song still renders");
+
+    assert_eq!(summary.frames, 3, "the render was not abandoned");
+
+    let warnings = recorder.warnings();
+    assert_eq!(warnings.len(), 1, "warn once, not per frame: {warnings:?}");
+    let warning = &warnings[0];
+    assert!(
+        warning.contains("tone-untagged.mp3"),
+        "name the song: {warning}"
+    );
+    assert!(warning.contains("--title"), "say what to do: {warning}");
+    assert!(
+        warning.contains("--no-text"),
+        "say how to silence it: {warning}"
+    );
+}
+
+/// `--title` and `--artist` put a card on a song that has no tags to draw one
+/// from, and there is then nothing to warn about (UT-009).
+#[test]
+fn overrides_put_a_card_on_an_untagged_song_without_a_warning() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (overridden, bare) = (dir.path().join("named.mp4"), dir.path().join("bare.mp4"));
+    let recorder = Recorder::default();
+
+    let mut config = text_config();
+    config.text.title = Some("Cold Design".to_owned());
+    render_song(
+        &ffmpeg,
+        &fixture("tone-untagged.mp3"),
+        &overridden,
+        &config,
+        "1.6s..1.7s",
+        &recorder,
+    )
+    .expect("renders");
+
+    assert!(
+        recorder.warnings().is_empty(),
+        "an overridden title is a title: {:?}",
+        recorder.warnings(),
+    );
+
+    config.text.title = None;
+    render_song(
+        &ffmpeg,
+        &fixture("tone-untagged.mp3"),
+        &bare,
+        &config,
+        "1.6s..1.7s",
+        &NoopProgress,
+    )
+    .expect("renders");
+
+    let named = recorded_frames(&overridden);
+    let bare = recorded_frames(&bare);
+    assert!(
+        different_pixels(&named[0], &bare[0]) > 100,
+        "`--title` resolved but never reached a pixel",
+    );
+}
+
+/// A `[text] font` that does not exist costs a millisecond, not a decode — the
+/// same promise `visual.preset`, `visual.palette`, and `background.image` keep.
+#[test]
+fn a_missing_font_fails_before_the_song_is_even_decoded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.text.font = FontChoice::Path(dir.path().join("Inter.ttf"));
+
+    let progress = Recorder::default();
+    let err = render_song(
+        &ffmpeg,
+        &fixture_mp3(),
+        &output,
+        &config,
+        "0s..0.2s",
+        &progress,
+    )
+    .expect_err("there is no such font");
+
+    assert!(matches!(err, Error::Input(_)), "got {err:?}");
+    assert!(err.to_string().contains("Inter.ttf"), "{err}");
+    assert!(progress.phases().is_empty(), "nothing was analyzed");
     assert!(!output.exists() && !part.exists(), "nothing was written");
 }
 

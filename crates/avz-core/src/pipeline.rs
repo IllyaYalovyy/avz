@@ -9,9 +9,9 @@
 //! [`Globals`]: the palette, the frame's features, and `frame_index / fps` as
 //! the only clock.
 //!
-//! Each frame is a layer stack flattened by the [`Compositor`]: the palette
-//! backdrop at the bottom, the visualizer's premultiplied light over it, and —
-//! once RFC-001 Steps 19 and 20 land — the background image and the text card.
+//! Each frame is a layer stack flattened by the [`Compositor`]: the background —
+//! the palette backdrop, with `background.image` fitted over it — the
+//! visualizer's premultiplied light over that, and the title/artist card on top.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -19,9 +19,10 @@ use std::time::Duration;
 use crate::analysis::{self, EnvelopeParams};
 use crate::config::{Config, SampleRange, Seed};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
+use crate::meta;
 use crate::render::{
-    AdapterChoice, AdapterKind, Background, Compositor, Globals, Gpu, Layer, Offscreen, Preset,
-    Visualizer, palette,
+    AdapterChoice, AdapterKind, Background, Card, CardText, Compositor, Globals, Gpu, Layer,
+    Offscreen, Preset, TextCard, Visualizer, palette,
 };
 use crate::{Error, Phase, Progress, Result};
 
@@ -93,6 +94,16 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let params = preset.schema()?.resolve(&config.visual.params)?;
     let palette = palette::resolve(&config.visual.palette)?;
     let background = Background::load(&config.background)?;
+    let resolution = config.output.resolution;
+    // Shaped and rasterized here too, on the CPU, for the same reason: a font
+    // that is not there, and a song with no tags to name, are both things the
+    // user can act on before the render begins.
+    let card = text_card(
+        config,
+        request.input,
+        (resolution.width, resolution.height),
+        progress,
+    )?;
 
     progress.phase_started(Phase::Analyzing, None);
     let audio = analysis::decode(request.input)?;
@@ -110,17 +121,29 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         progress.warn(SOFTWARE_FALLBACK_WARNING);
     }
 
-    let resolution = config.output.resolution;
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
 
     // The layer stack, bottom to top (`VISION.md` §5.3). The background layer is
-    // the palette backdrop with `background.image` fitted over it; the looped
-    // video (RFC-001 NG2) and the text card (Step 20) are further entries in
-    // this slice.
+    // the palette backdrop with `background.image` fitted over it; the text card
+    // sits on top of the visuals, and is absent altogether when there is nothing
+    // to draw. The looped video (RFC-001 NG2) is a further entry in this slice.
     let background = background.layer(&gpu, resolution.width, resolution.height, palette);
     let visual = Layer::new(&gpu, resolution.width, resolution.height, "avz visualizer");
     let visualizer = Visualizer::new(&gpu, preset, &visual)?;
-    let compositor = Compositor::new(&gpu, &[&background, &visual])?;
+
+    let text = card
+        .as_ref()
+        .map(|card| {
+            let layer = Layer::new(&gpu, resolution.width, resolution.height, "avz text card");
+            TextCard::new(&gpu, card, palette).map(|card| (card, layer))
+        })
+        .transpose()?;
+
+    let layers: Vec<&Layer> = [&background, &visual]
+        .into_iter()
+        .chain(text.iter().map(|(_, layer)| layer))
+        .collect();
+    let compositor = Compositor::new(&gpu, &layers)?;
 
     let seed = seed_value(config.visual.seed);
 
@@ -159,6 +182,11 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
             params,
         );
         visualizer.draw(&gpu, &visual, &globals);
+        // The card was rasterized once; all that moves is the quad's opacity and
+        // its offset (`VISION.md` §5.3).
+        if let Some((card, layer)) = &text {
+            card.draw(&gpu, layer, index, fps);
+        }
         compositor.composite(&gpu, &target);
         target.read_rgba_into(&gpu, &mut pixels)?;
         encoder.write_frame(&pixels)?;
@@ -176,6 +204,67 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         adapter: gpu.kind(),
         output: request.output.to_path_buf(),
     })
+}
+
+/// The card `[text]` asks for, shaped and rasterized, or `None` if there is none.
+///
+/// Three ways to have no card, and only one of them is silent. `enabled = false`
+/// is what the user asked for. A song with neither tag and no override is the
+/// risk-matrix row `docs/TESTING.md` names: warn, skip the card, and render the
+/// video they came for. Words the font cannot draw at all are the same outcome
+/// by a different route.
+///
+/// # Errors
+///
+/// [`Error::Input`] if `[text] font` names a file that is not a font, or if the
+/// song's tags cannot be read at all — which is the song being unreadable, and
+/// the decoder would have said so a moment later.
+fn text_card(
+    config: &Config,
+    input: &Path,
+    frame: (u32, u32),
+    progress: &dyn Progress,
+) -> Result<Option<Card>> {
+    if !config.text.enabled {
+        return Ok(None);
+    }
+
+    let tags = meta::read(input)?;
+    let words = CardText::resolve(&config.text, tags.title.as_deref(), tags.artist.as_deref());
+    if words.is_empty() {
+        progress.warn(&no_words_warning(input));
+        return Ok(None);
+    }
+
+    let card = Card::prepare(&config.text, &words, frame)?;
+    if card.is_none() {
+        progress.warn(&no_ink_warning(&config.text.font));
+    }
+    Ok(card)
+}
+
+/// What to say when the song names neither a title nor an artist.
+///
+/// Actionable, per `AGENTS.md`: what happened, and the two flags that answer it.
+fn no_words_warning(input: &Path) -> String {
+    format!(
+        "`{}` has no ID3 title or artist, so the text card was skipped — pass \
+         `--title` and `--artist` to set them, or `--no-text` to silence this",
+        input.display(),
+    )
+}
+
+/// What to say when the words are there and the font cannot draw any of them.
+fn no_ink_warning(font: &crate::config::FontChoice) -> String {
+    let font = match font {
+        crate::config::FontChoice::Auto => "the bundled font".to_owned(),
+        crate::config::FontChoice::Path(path) => format!("`{}`", path.display()),
+    };
+    format!(
+        "{font} has no glyphs for the title or artist, so the text card was \
+         skipped — pass `--set text.font=PATH` a font that covers them, or \
+         `--no-text` to silence this",
+    )
 }
 
 /// The seed `auto` stands for, until RFC-001 Step 22 derives it from the input

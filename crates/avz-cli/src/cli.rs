@@ -24,6 +24,12 @@ pub struct Cli {
 }
 
 /// What the user asked `avz` to do.
+///
+/// `Render` is much the largest variant, and it stays unboxed: exactly one of
+/// these exists per process, it lives on the stack of `main` for the whole run,
+/// and clap's `Subcommand` derive needs a variant whose field implements `Args`
+/// — which `Box<RenderArgs>` does not.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Render an abstract music video from an mp3.
@@ -82,6 +88,20 @@ pub struct RenderArgs {
     /// `--set background.blur=6 --set background.darken=0.35`.
     #[arg(long, value_name = "FILE")]
     pub bg: Option<PathBuf>,
+
+    /// Title for the text card, overriding the ID3 tag.
+    #[arg(long, value_name = "TEXT", conflicts_with = "no_text")]
+    pub title: Option<String>,
+
+    /// Artist for the text card, overriding the ID3 tag.
+    #[arg(long, value_name = "TEXT", conflicts_with = "no_text")]
+    pub artist: Option<String>,
+
+    /// Draw no title/artist card.
+    ///
+    /// A song with neither tag draws none anyway, and says so. This silences it.
+    #[arg(long)]
+    pub no_text: bool,
 
     /// A TOML config file. See `avz config --example` for a documented template.
     #[arg(long, value_name = "FILE")]
@@ -239,6 +259,35 @@ mod tests {
             err.to_string().contains("palette entry 1"),
             "the bad entry is named: {err}",
         );
+    }
+
+    /// The three flags `VISION.md` §5.2 names for the text card.
+    #[test]
+    fn the_text_card_can_be_titled_credited_and_turned_off() {
+        let args = render_args(&["--title", "Cold Design", "--artist", "avz"]);
+
+        assert_eq!(args.title.as_deref(), Some("Cold Design"));
+        assert_eq!(args.artist.as_deref(), Some("avz"));
+        assert!(!args.no_text);
+
+        assert!(render_args(&["--no-text"]).no_text);
+    }
+
+    /// `--no-text` says there is no card; `--title` says what is on it. Asking
+    /// for both is a contradiction, and clap catches it before anything runs.
+    #[test]
+    fn a_titled_card_that_is_also_disabled_is_a_usage_error() {
+        let err = Cli::try_parse_from(["avz", "render", "song.mp3", "--no-text", "--title", "x"])
+            .expect_err("a card cannot be both named and absent");
+
+        assert_eq!(err.kind(), clap::error::ErrorKind::ArgumentConflict);
+    }
+
+    #[test]
+    fn a_bare_render_has_no_opinion_about_the_text_card() {
+        let args = render_args(&[]);
+
+        assert!(args.title.is_none() && args.artist.is_none() && !args.no_text);
     }
 
     #[test]

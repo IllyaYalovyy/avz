@@ -103,12 +103,22 @@ pub struct Text {
     pub enabled: bool,
     /// Where the card sits.
     pub position: Position,
-    /// When the card fades in.
+    /// When the card starts fading in.
     pub in_at: Seconds,
-    /// How long the card stays up.
+    /// How long the card stays at full opacity, between the two fades.
     pub hold: Seconds,
+    /// How long each fade lasts, in and out alike.
+    pub fade: Seconds,
     /// Which font renders it.
     pub font: FontChoice,
+    /// Title type size, as a fraction of the frame height.
+    pub size: f32,
+    /// Distance from the frame edge, as a fraction of the frame height.
+    pub margin: f32,
+    /// Title, overriding the ID3 tag.
+    pub title: Option<String>,
+    /// Artist, overriding the ID3 tag.
+    pub artist: Option<String>,
 }
 
 impl Default for Config {
@@ -139,7 +149,12 @@ impl Default for Config {
                 position: Position::BottomLeft,
                 in_at: "1.0s".parse().expect("built-in duration parses"),
                 hold: "6.0s".parse().expect("built-in duration parses"),
+                fade: "0.6s".parse().expect("built-in duration parses"),
                 font: FontChoice::Auto,
+                size: 0.05,
+                margin: 0.06,
+                title: None,
+                artist: None,
             },
         }
     }
@@ -222,8 +237,18 @@ pub struct TextLayer {
     pub in_at: Option<Seconds>,
     /// See [`Text::hold`].
     pub hold: Option<Seconds>,
+    /// See [`Text::fade`].
+    pub fade: Option<Seconds>,
     /// See [`Text::font`].
     pub font: Option<FontChoice>,
+    /// See [`Text::size`].
+    pub size: Option<f64>,
+    /// See [`Text::margin`].
+    pub margin: Option<f64>,
+    /// See [`Text::title`].
+    pub title: Option<String>,
+    /// See [`Text::artist`].
+    pub artist: Option<String>,
 }
 
 /// The configuration sources, ordered lowest precedence first.
@@ -357,7 +382,12 @@ impl ConfigLayer {
         overlay(&mut self.text.position, higher.text.position);
         overlay(&mut self.text.in_at, higher.text.in_at);
         overlay(&mut self.text.hold, higher.text.hold);
+        overlay(&mut self.text.fade, higher.text.fade);
         overlay(&mut self.text.font, higher.text.font);
+        overlay(&mut self.text.size, higher.text.size);
+        overlay(&mut self.text.margin, higher.text.margin);
+        overlay(&mut self.text.title, higher.text.title);
+        overlay(&mut self.text.artist, higher.text.artist);
     }
 
     /// Apply this layer to the built-in defaults and validate.
@@ -458,8 +488,23 @@ impl ConfigLayer {
         if let Some(hold) = self.text.hold {
             config.text.hold = hold;
         }
+        if let Some(fade) = self.text.fade {
+            config.text.fade = fade;
+        }
         if let Some(font) = self.text.font {
             config.text.font = font;
+        }
+        if let Some(size) = self.text.size {
+            config.text.size = positive_fraction("text.size", size, 1.0)?;
+        }
+        if let Some(margin) = self.text.margin {
+            config.text.margin = bounded("text.margin", margin, 0.0..MAX_TEXT_MARGIN)?;
+        }
+        if let Some(title) = self.text.title {
+            config.text.title = Some(non_blank("text.title", title)?);
+        }
+        if let Some(artist) = self.text.artist {
+            config.text.artist = Some(non_blank("text.artist", artist)?);
         }
 
         Ok(config)
@@ -477,6 +522,44 @@ const MAX_FPS: u32 = 240;
 
 /// x264's CRF scale tops out at 51.
 const MAX_CRF: u8 = 51;
+
+/// Half the frame height of margin on each side leaves the card nowhere to sit.
+const MAX_TEXT_MARGIN: f64 = 0.5;
+
+/// A fraction of something, which must be more than none of it and no more than
+/// `max` of it.
+fn positive_fraction(key: &str, value: f64, max: f64) -> Result<f32> {
+    if !value.is_finite() || value <= 0.0 || value > max {
+        return Err(Error::Config(format!(
+            "`{key}` must be greater than 0 and at most {max}, got {value}"
+        )));
+    }
+    Ok(value as f32)
+}
+
+/// A value in `range`: at least its start, and below its end.
+fn bounded(key: &str, value: f64, range: std::ops::Range<f64>) -> Result<f32> {
+    if !value.is_finite() || !range.contains(&value) {
+        return Err(Error::Config(format!(
+            "`{key}` must be at least {} and below {}, got {value}",
+            range.start, range.end,
+        )));
+    }
+    Ok(value as f32)
+}
+
+/// Reject a string that is empty or only whitespace, and trim the rest.
+///
+/// The same reason [`non_blank_path`] exists: `--title ""` is a shell variable
+/// that expanded to nothing, and a card with a blank line where a title goes is
+/// worse than one with no title at all.
+fn non_blank(key: &str, value: String) -> Result<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(Error::Config(format!("`{key}` must not be blank")));
+    }
+    Ok(trimmed.to_owned())
+}
 
 fn positive(key: &str, value: f64) -> Result<f32> {
     if !value.is_finite() || value <= 0.0 {

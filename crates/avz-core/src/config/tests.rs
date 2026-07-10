@@ -139,6 +139,8 @@ fn builtin_defaults_are_a_complete_1080p30_render() {
     assert_eq!(config.visual.seed, Seed::Auto);
     assert_eq!(config.background.source, None);
     assert!(config.text.enabled);
+    assert_eq!(config.text.title, None, "the card's words come from ID3");
+    assert_eq!(config.text.artist, None);
 }
 
 // ---------------------------------------------------------------------------
@@ -402,6 +404,43 @@ fn blank_string_values_are_rejected_by_name() {
         let err = layer(source).resolve().expect_err("rejected");
         assert!(err.to_string().contains(key), "{source:?} -> {err}");
     }
+}
+
+/// The card's timing and geometry are numbers with meanings, and every one of
+/// them has a range outside which the card is not a card.
+#[test]
+fn out_of_range_text_geometry_is_rejected_by_name() {
+    let cases = [
+        ("[text]\nsize = 0.0\n", "text.size"),
+        ("[text]\nsize = 1.5\n", "text.size"),
+        ("[text]\nmargin = -0.1\n", "text.margin"),
+        ("[text]\nmargin = 0.5\n", "text.margin"),
+    ];
+
+    for (source, key) in cases {
+        let err = layer(source).resolve().expect_err("rejected");
+        assert!(err.to_string().contains(key), "{source:?} -> {err}");
+    }
+}
+
+/// `--title` and `--artist` override the ID3 tags, so they are settings like any
+/// other and reach the renderer through the same chain.
+#[test]
+fn text_overrides_and_fade_survive_the_precedence_chain() {
+    let sources = Sources {
+        file: layer("[text]\ntitle = \"From the file\"\nfade = \"0.25s\"\n"),
+        cli: layer("[text]\ntitle = \"From the flag\"\n"),
+        ..Sources::default()
+    };
+
+    let config = sources.resolve().expect("resolves");
+
+    assert_eq!(config.text.title.as_deref(), Some("From the flag"));
+    assert_close(config.text.fade.as_secs_f64() as f32, 0.25);
+    assert_eq!(
+        config.text.artist, None,
+        "an override nobody wrote must not invent an artist"
+    );
 }
 
 #[test]
