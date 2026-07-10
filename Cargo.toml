@@ -23,6 +23,10 @@ rayon = "1.11"
 # shared across rayon's threads, so the analysis pass plans nothing per window.
 rustfft = "6.4"
 serde = { version = "1.0", features = ["derive"] }
+# Preset parameter schemas. `VISION.md` §6 fixes them as JSON, one file per
+# preset, embedded with `include_str!`; `toml` cannot read them and a
+# hand-rolled parser would be a parser to maintain.
+serde_json = "1.0"
 strsim = "0.11"
 # mp3 only: avz decodes nothing else, and `id3v2` lets the demuxer skip the tag
 # that `probe` already read. The default feature set adds flac/ogg/wav/vorbis.

@@ -8,6 +8,7 @@
 
 mod cli;
 mod exit;
+mod presets;
 mod probe;
 mod render;
 
@@ -84,7 +85,7 @@ fn run(cli: &Cli) -> anyhow::Result<()> {
         }
         Command::Presets(args) => {
             tracing::debug!(name = ?args.name, "presets requested");
-            not_implemented(cli)
+            presets::run(args)
         }
         Command::Config(args) => {
             tracing::debug!(example = args.example, "config requested");

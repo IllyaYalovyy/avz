@@ -80,9 +80,11 @@ const SOFTWARE_FALLBACK_WARNING: &str = "no GPU adapter found, falling back to s
 pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<RenderSummary> {
     let config = request.config;
     let fps = config.output.fps;
-    // Before decoding a five-minute song: a typo'd preset name is the user's
-    // argument, and they should hear about it in the first millisecond.
+    // Before decoding a five-minute song: a typo'd preset name, an unknown
+    // parameter, or a value outside its range are all the user's arguments, and
+    // they should hear about them in the first millisecond.
     let preset = Preset::by_name(&config.visual.preset)?;
+    let params = preset.schema()?.resolve(&config.visual.params)?;
 
     progress.phase_started(Phase::Analyzing, None);
     let audio = analysis::decode(request.input)?;
@@ -137,6 +139,7 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
             seed,
             timeline.frame(index),
             DEFAULT_PALETTE,
+            params,
         );
         visualizer.draw(&gpu, &target, &globals);
         target.read_rgba_into(&gpu, &mut pixels)?;

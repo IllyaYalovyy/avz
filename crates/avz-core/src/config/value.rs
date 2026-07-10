@@ -438,6 +438,18 @@ pub struct Color {
     pub a: u8,
 }
 
+impl fmt::Display for Color {
+    /// The shortest form that round-trips through [`FromStr`]: `#rrggbb` when
+    /// the color is opaque, `#rrggbbaa` when it is not.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "#{:02x}{:02x}{:02x}", self.r, self.g, self.b)?;
+        if self.a != 0xff {
+            write!(f, "{:02x}", self.a)?;
+        }
+        Ok(())
+    }
+}
+
 impl FromStr for Color {
     type Err = ParseError;
 

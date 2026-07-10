@@ -554,6 +554,120 @@ fn an_unknown_preset_fails_before_the_song_is_even_decoded() {
     assert!(!output.exists() && !part.exists(), "nothing was written");
 }
 
+/// The M3 acceptance criterion, on pixels: a `[visual.params]` value from the
+/// config reaches the shader and changes the picture.
+///
+/// `param_reaches_declared_uniform_slot` proves the schema packs into the slot
+/// the shader reads. This proves the *pipeline* carries a user's table that far
+/// — that `config.visual.params` is resolved rather than dropped on the way from
+/// the config file to the uniform.
+#[test]
+fn a_preset_parameter_from_the_config_reaches_the_rendered_pixels() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (plain, _) = output_paths(dir.path());
+    let tuned = dir.path().join("tuned.mp4");
+
+    render_fixture(&ffmpeg, &plain, Some(sample("0s..0.2s")), &NoopProgress).expect("renders");
+
+    let mut config = config();
+    // `vignette` at zero: the corners stop falling off, so every frame changes.
+    config.visual.params = "vignette = 0.0".parse().expect("a params table");
+
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &tuned,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &NoopProgress,
+    )
+    .expect("the tuned render succeeds");
+    drop(_device);
+
+    assert_ne!(
+        recorded_frames(&plain),
+        recorded_frames(&tuned),
+        "`visual.params.vignette` never reached the shader",
+    );
+}
+
+/// A parameter outside its declared range is the user's argument. It must fail
+/// before the song is decoded — the whole point of validating against a schema
+/// rather than letting the shader clamp it.
+#[test]
+fn an_out_of_range_parameter_fails_before_the_song_is_decoded() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.visual.params = "bass_drive = 99.0".parse().expect("a params table");
+
+    let progress = Recorder::default();
+    let _device = one_device_at_a_time();
+    let err = render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: None,
+            ffmpeg: &ffmpeg,
+        },
+        &progress,
+    )
+    .expect_err("`bass_drive` tops out well below 99");
+
+    assert!(matches!(err, Error::Config(_)), "exit 2, got {err:?}");
+    let message = err.to_string();
+    assert!(message.contains("bass_drive"), "name the parameter: {err}");
+    assert!(message.contains("0..4"), "name the range: {err}");
+    assert!(
+        progress.phases().is_empty(),
+        "the song was decoded before the config was validated",
+    );
+    assert!(!output.exists() && !part.exists(), "nothing was written");
+}
+
+/// A parameter the preset does not have, with the name it probably meant.
+#[test]
+fn an_unknown_parameter_fails_before_the_song_is_decoded_and_suggests_a_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, part) = output_paths(dir.path());
+
+    let mut config = config();
+    config.visual.params = "bas_drive = 2.0".parse().expect("a params table");
+
+    let progress = Recorder::default();
+    let _device = one_device_at_a_time();
+    let err = render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: None,
+            ffmpeg: &ffmpeg,
+        },
+        &progress,
+    )
+    .expect_err("there is no `bas_drive`");
+
+    assert!(matches!(err, Error::Config(_)), "exit 2, got {err:?}");
+    assert!(
+        err.to_string().contains("did you mean `bass_drive`"),
+        "{err}"
+    );
+    assert!(progress.phases().is_empty(), "nothing was analyzed");
+    assert!(!output.exists() && !part.exists(), "nothing was written");
+}
+
 /// A sample the song cannot satisfy is the user's argument, not a render
 /// failure — exit code 2, and nothing is spawned, rendered, or written.
 #[test]

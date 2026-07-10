@@ -98,15 +98,22 @@ one. The warning itself, once per render and only under `--adapter auto`:
 **Flow:**
 
 1. `avz presets`
-2. `avz presets nebula`
+2. `avz presets pulse`
 
 **Outcome:** The first lists every preset with a one-line description. The
-second pretty-prints nebula's full parameter schema: name, type, default, valid
-range, and description, plus any `perf_hint` for software rendering.
+second pretty-prints the preset's full parameter schema: name, type, default,
+valid range, and description, plus any `perf_hint` for software rendering.
 
 **Interactions:** 1–2
 
-**Regression coverage:** TODO
+**Regression coverage:** `presets_command_lists_all_registered`,
+`presets_name_prints_schema_fields`,
+`presets_of_an_unknown_preset_exits_2_and_names_the_known_ones` (through the
+binary); `the_listing_names_every_preset_and_describes_it`,
+`the_schema_print_shows_every_column_for_every_type`,
+`the_schema_columns_are_aligned`,
+`a_perf_hint_is_printed_when_the_schema_carries_one` (the formatter). `nebula`
+lands in RFC-001 Step 17; until then `pulse` is the only preset to print.
 
 ## UT-005: Inspect an input file before rendering
 
@@ -157,7 +164,15 @@ a value outside its range, fails with exit code 2 before any rendering starts.
 
 **Interactions:** 1
 
-**Regression coverage:** TODO
+**Regression coverage:** `set_override_beats_config_file_value`,
+`cli_flag_beats_set_override` (precedence);
+`a_set_override_beats_an_illegal_value_in_the_config_file`,
+`a_config_files_preset_params_are_validated_against_the_schema`,
+`out_of_range_value_fails_exit_2_before_render`,
+`unknown_param_via_set_exits_2_with_a_suggestion` (through the binary);
+`an_out_of_range_parameter_fails_before_the_song_is_decoded` (nothing is decoded
+first); `a_preset_parameter_from_the_config_reaches_the_rendered_pixels` (it
+reaches the shader).
 
 ## UT-008: Emit a documented config template
 

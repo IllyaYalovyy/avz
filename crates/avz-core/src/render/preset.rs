@@ -1,35 +1,35 @@
 //! The preset registry and the pipeline that draws one.
 //!
-//! A preset is a WGSL file in `crates/avz-core/presets/`, embedded with
-//! `include_str!`, drawn as a fullscreen triangle against the
-//! [`Globals`](crate::render::Globals) uniform (`VISION.md` §6). Adding one is a
-//! new `.wgsl` file and a row in [`PRESETS`] — no pipeline, binding, or
+//! A preset is a WGSL file and a JSON parameter schema in
+//! `crates/avz-core/presets/`, both embedded with `include_str!`, drawn as a
+//! fullscreen triangle against the [`Globals`](crate::render::Globals) uniform
+//! (`VISION.md` §6). Adding one is those two files and a row in [`PRESETS`] —
+//! which lives in `presets/registry.rs` and is `include!`d here, so a new preset
+//! touches nothing outside `presets/` (RFC-001 G3). No pipeline, binding, or
 //! compositor code moves (`AGENTS.md`, rendering).
 //!
-//! The parameter schema each preset will also carry, and the palette that fills
-//! `Globals::palette`, arrive in RFC-001 Steps 15 and 16.
+//! The palette that fills `Globals::palette` arrives in RFC-001 Step 16.
 
 use crate::render::globals::{GLOBALS_SIZE, Globals};
 use crate::render::offscreen::{FRAME_FORMAT, Gpu, Offscreen};
+use crate::render::schema::PresetSchema;
 use crate::{Error, Result};
 
-/// One visualizer: a name, a one-line description, and its shader.
+/// One visualizer: a name, a one-line description, its shader, and its schema.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Preset {
     /// What `--preset` and `visual.preset` name it.
     pub name: &'static str,
-    /// The one-line description `avz presets` prints (RFC-001 Step 15).
+    /// The one-line description `avz presets` prints.
     pub description: &'static str,
     /// The WGSL source, embedded in the binary.
     pub source: &'static str,
+    /// The JSON parameter schema, embedded in the binary. Parsed by
+    /// [`Preset::schema`].
+    pub schema: &'static str,
 }
 
-/// Every preset avz ships, in the order `avz presets` lists them.
-pub const PRESETS: &[Preset] = &[Preset {
-    name: "pulse",
-    description: "minimal, geometric: concentric rings driven by the kick",
-    source: include_str!("../../presets/pulse.wgsl"),
-}];
+include!("../../presets/registry.rs");
 
 impl Preset {
     /// The preset called `name`.
@@ -43,13 +43,32 @@ impl Preset {
             .iter()
             .find(|preset| preset.name == name)
             .ok_or_else(|| {
-                let known: Vec<&str> = PRESETS.iter().map(|preset| preset.name).collect();
                 Error::Config(format!(
                     "unknown preset `{name}`; avz ships: {}",
-                    known.join(", ")
+                    names().join(", ")
                 ))
             })
     }
+
+    /// This preset's parameter schema, parsed.
+    ///
+    /// Parsed on demand rather than at startup: a render reads one schema, and
+    /// `avz presets` reads them all once. Both are microseconds.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Config`] if the embedded JSON is malformed or self-contradictory.
+    /// The schema ships inside the binary, so that is a bug rather than the
+    /// user's mistake — `every_preset_ships_a_schema_that_parses` is what keeps
+    /// it from reaching anyone.
+    pub fn schema(&self) -> Result<PresetSchema> {
+        PresetSchema::parse(self.name, self.schema)
+    }
+}
+
+/// Every preset name, in registry order.
+pub fn names() -> Vec<&'static str> {
+    PRESETS.iter().map(|preset| preset.name).collect()
 }
 
 /// A preset's render pipeline, its uniform buffer, and its bind group.
@@ -204,6 +223,7 @@ impl Visualizer {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::render::schema::ParamKind;
 
     #[test]
     fn pulse_is_the_preset_the_default_config_names() {
@@ -226,6 +246,89 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("pulze"), "quote the typo: {message}");
         assert!(message.contains("pulse"), "name what does exist: {message}");
+    }
+
+    /// Every shipped preset carries a schema that parses, and a schema is not
+    /// optional: it is the only thing `avz presets` and `--set` can validate
+    /// against.
+    #[test]
+    fn every_preset_ships_a_schema_that_parses() {
+        for preset in PRESETS {
+            let schema = preset
+                .schema()
+                .unwrap_or_else(|err| panic!("preset `{}`: {err}", preset.name));
+
+            assert_eq!(schema.preset, preset.name);
+            assert!(
+                !schema.params.is_empty(),
+                "preset `{}` exposes nothing to tune",
+                preset.name,
+            );
+        }
+    }
+
+    /// A default outside its own declared range would make `avz presets` print a
+    /// lie and every default render illegal. Keeps future preset authors honest.
+    #[test]
+    fn schema_defaults_all_within_declared_ranges() {
+        for preset in PRESETS {
+            let schema = preset.schema().expect("a shipped schema parses");
+            for param in &schema.params {
+                match &param.kind {
+                    ParamKind::Float { default, min, max } => assert!(
+                        default >= min && default <= max,
+                        "`{}.{}` defaults to {default}, outside {min}..{max}",
+                        preset.name,
+                        param.name,
+                    ),
+                    ParamKind::Int { default, min, max } => assert!(
+                        default >= min && default <= max,
+                        "`{}.{}` defaults to {default}, outside {min}..{max}",
+                        preset.name,
+                        param.name,
+                    ),
+                    ParamKind::Enum { default, variants } => assert!(
+                        variants.contains(default),
+                        "`{}.{}` defaults to `{default}`, not one of its variants",
+                        preset.name,
+                        param.name,
+                    ),
+                    ParamKind::Bool { .. } | ParamKind::Color { .. } => {}
+                }
+            }
+
+            // `resolve` re-checks the same thing on the way into the uniform, so
+            // an empty override table must be accepted by every shipped schema.
+            schema
+                .resolve(&toml::Table::new())
+                .expect("the defaults pack");
+        }
+    }
+
+    /// A schema slot nothing in the WGSL reads is a knob wired to nothing. The
+    /// shader spells the accessor out, so the accessor is what to look for.
+    #[test]
+    fn every_schema_parameter_is_read_by_the_shader_that_declares_it() {
+        const COMPONENTS: [&str; 4] = ["x", "y", "z", "w"];
+
+        for preset in PRESETS {
+            let schema = preset.schema().expect("a shipped schema parses");
+            for param in &schema.params {
+                let index = param.slot.index;
+                let accessor = match param.kind {
+                    // A color is the whole `vec4`, however the shader swizzles it.
+                    ParamKind::Color { .. } => format!("params[{index}]"),
+                    _ => format!("params[{index}].{}", COMPONENTS[param.slot.component]),
+                };
+
+                assert!(
+                    preset.source.contains(&accessor),
+                    "preset `{}` declares `{}` at `{accessor}`, but its WGSL never reads it",
+                    preset.name,
+                    param.name,
+                );
+            }
+        }
     }
 
     /// Every shipped preset declares the `VISION.md` §6 uniform contract, whole.

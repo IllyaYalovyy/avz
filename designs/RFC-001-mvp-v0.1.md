@@ -254,6 +254,54 @@ specific to this RFC:
   (`the_rendered_brightness_visibly_follows_the_loudness_of_the_song`). The raw
   features are in the uniform and unused by `pulse`; `nebula` and `particles` are
   what they are for.
+- **The preset registry lives in `presets/`, not in `src/`** (decided in Step
+  15). G3 promises that adding a preset touches only `presets/`, and a `PRESETS`
+  constant in `src/render/preset.rs` breaks that promise by one line — which is
+  exactly the kind of erosion nobody notices until they add the fourth preset.
+  `presets/registry.rs` holds the rows and is `include!`d by the module;
+  `include_str!` inside an `include!`d file resolves against that file's own
+  directory, so the shader and schema paths stay local to `presets/` too. A
+  preset is therefore `<name>.wgsl`, `<name>.json`, one registry row, and its
+  golden hashes. `scripts/quality.d/96-a-preset-is-only-files-in-presets.sh`
+  fails the gate if a schema, a shader, or a registry row drifts out of the
+  directory, or if a shader ships without the schema `avz presets` prints.
+- **A schema declares the uniform component each parameter occupies** (decided
+  in Step 15). `VISION.md` §6 gives a preset eight `vec4` slots and says the
+  schema maps names onto them. Written as `"slot": [index, component]`, that
+  mapping is checkable: `PresetSchema::parse` rejects two parameters claiming one
+  component (the second would silently overwrite the first) and a `color` that
+  does not start at component 0 (it is four floats and would run off its `vec4`).
+  `every_schema_parameter_is_read_by_the_shader_that_declares_it` then greps the
+  WGSL for the accessor, so a knob wired to a slot the shader ignores fails the
+  suite rather than the user's expectations.
+- **Every `pulse` default reproduces the constant it replaced** (decided in Step
+  15). Parameterizing a shipped shader is the one change that can rewrite every
+  golden hash while looking like a refactor. Choosing defaults that are exactly
+  the literals Step 14 tuned — `1.0` where the parameter scales a term, `14.0`
+  where it replaces `14.0` — keeps `tests/golden/pulse.txt` byte-identical, and
+  `param_reaches_declared_uniform_slot` asserts that the defaults *are* what the
+  committed hashes were rendered from. A future author who changes a default
+  therefore has to say so in the same commit that regenerates the hashes.
+- **Preset parameters are validated before the song is decoded** (decided in
+  Step 15). `pipeline::render` resolves `[visual.params]` against the schema on
+  the line after it resolves the preset name, so an unknown parameter or an
+  out-of-range value costs a millisecond rather than a five-minute analysis pass,
+  and exits 2 with the range it violated. Defaults for parameters the config never
+  names are filled at that same moment, which is why `Sources::preset_defaults`
+  stays empty: a preset's defaults cannot be a config *layer* without resolving
+  the preset name first, and the preset name comes out of the layers.
+- **A `--set` key that names no config section is a preset parameter** (decided
+  in Step 15). `--set visual.params.bass_drive=1.5` is the honest path and stays
+  legal, but nobody types it twice. `bass_drive=1.5` and `pulse.bass_drive=1.5`
+  expand to it, because the four `ConfigLayer` tables are a closed set and a
+  first segment outside it can mean nothing else. A first segment that is neither
+  a section nor a shipped preset is rejected with both lists — otherwise
+  `outputt.fps=30` would be filed under `visual.params` and reported as an
+  unknown *parameter*, which points the user at the wrong mistake.
+- **`serde_json` is a new dependency** (decided in Step 15). `VISION.md` §6 fixes
+  the schema format as JSON, `toml` cannot read it, and a hand-rolled parser
+  would be a parser to maintain. It is the same ecosystem, the same maintainers,
+  and the same `derive` already in the tree; it adds `itoa`, `ryu`, and `memchr`.
 - **Remote CI is advisory** (owner decision, 2026-07-09). The local
   `./scripts/quality.sh` gate — tests plus the invariant hooks in
   `scripts/quality.d/` — is the authority for "done". The workflow Step 10
@@ -336,7 +384,7 @@ Deferred NG1–NG3 items are backlog issues #24–#29, labeled `post-mvp`.
 
 **M3 — Preset system** *(accept: params adjustable via config and `--set`; preset #3 would touch only `presets/`)*
 
-- [ ] **Step 15** - Preset schemas: JSON, validation, `--set`, `avz presets`
+- [x] **Step 15** - Preset schemas: JSON, validation, `--set`, `avz presets`
   *(prerequisite: Step 14)*
 - [ ] **Step 16** - Palettes: named built-ins + inline hex *(prerequisite: Step 15)*
 - [ ] **Step 17** - `nebula` preset: feedback texture plumbing *(prerequisite: Step 15)*

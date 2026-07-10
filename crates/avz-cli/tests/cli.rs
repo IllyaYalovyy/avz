@@ -288,3 +288,140 @@ fn quiet_and_verbose_conflict_is_rejected() {
         .assert()
         .code(2);
 }
+
+// ---------------------------------------------------------------------------
+// `avz presets` and preset parameters (UT-004, UT-007)
+// ---------------------------------------------------------------------------
+
+/// UT-004, first half: every preset avz ships, with its one-line description.
+#[test]
+fn presets_command_lists_all_registered() {
+    avz()
+        .arg("presets")
+        .assert()
+        .success()
+        .stdout(contains("pulse"))
+        .stdout(contains("concentric rings driven by the kick"));
+}
+
+/// UT-004, second half: name, type, default, range, and description, for every
+/// parameter the preset declares.
+#[test]
+fn presets_name_prints_schema_fields() {
+    avz()
+        .args(["presets", "pulse"])
+        .assert()
+        .success()
+        .stdout(contains("bass_drive"))
+        .stdout(contains("float"))
+        .stdout(contains("0..4"))
+        .stdout(contains("How hard the kick swells the core disc."))
+        .stdout(contains("ring_count"))
+        .stdout(contains("int"))
+        .stdout(contains("flash"))
+        .stdout(contains("bool"))
+        .stdout(contains("true|false"));
+}
+
+/// A typo'd preset name is the user's argument: exit 2, and say what does exist.
+#[test]
+fn presets_of_an_unknown_preset_exits_2_and_names_the_known_ones() {
+    avz()
+        .args(["presets", "pulze"])
+        .assert()
+        .code(2)
+        .stderr(contains("pulse"));
+}
+
+/// UT-007: a `--set` outside the schema's range fails with exit code 2 before
+/// any rendering starts, and leaves no output file behind.
+#[test]
+fn out_of_range_value_fails_exit_2_before_render() {
+    let path = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(&song)
+        .args(["--set", "bass_drive=99"])
+        .assert()
+        .code(2)
+        .stderr(contains("bass_drive"))
+        .stderr(contains("0..4"));
+
+    assert!(
+        !song.with_extension("mp4").exists(),
+        "a rejected config must not leave a render behind"
+    );
+}
+
+/// The bare `--set name=value` shorthand resolves into the active preset's
+/// parameters, so a typo is reported as a parameter and not as a config section.
+#[test]
+fn unknown_param_via_set_exits_2_with_a_suggestion() {
+    let path = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--out")
+        .arg(dir.path().join("out.mp4"))
+        .args(["--set", "pulse.bas_drive=2"])
+        .assert()
+        .code(2)
+        .stderr(contains("unknown parameter `bas_drive`"))
+        .stderr(contains("did you mean `bass_drive`"));
+}
+
+/// UT-007: `[visual.params]` in a `--config` file is validated against the same
+/// schema. This is what proves the `--config` layer reaches the preset at all.
+#[test]
+fn a_config_files_preset_params_are_validated_against_the_schema() {
+    let path = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("base.toml");
+    fs::write(&config, "[visual.params]\nring_count = 99\n").expect("write");
+
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--out")
+        .arg(dir.path().join("out.mp4"))
+        .assert()
+        .code(2)
+        .stderr(contains("ring_count"))
+        .stderr(contains("1..32"));
+}
+
+/// The precedence contract from `VISION.md` §5.5, at the CLI: `--set` wins over
+/// the config file. A `--set` that is legal must rescue a file value that is not.
+#[test]
+fn a_set_override_beats_an_illegal_value_in_the_config_file() {
+    let path = path_with_fake_ffmpeg();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config = dir.path().join("base.toml");
+    fs::write(&config, "[visual.params]\nring_count = 99\n").expect("write");
+
+    // The render still fails — the fake ffmpeg encodes nothing — but with exit
+    // code 4, a render failure, and not the exit 2 a losing `--set` would give.
+    avz()
+        .env("PATH", path.path())
+        .arg("render")
+        .arg(fixture("tone-tagged.mp3"))
+        .arg("--config")
+        .arg(&config)
+        .arg("--out")
+        .arg(dir.path().join("out.mp4"))
+        .args(["--set", "ring_count=8"])
+        .assert()
+        .code(4)
+        .stderr(contains("ring_count").not());
+}
