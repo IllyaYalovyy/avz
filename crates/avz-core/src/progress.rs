@@ -4,6 +4,8 @@
 //! implementation supplied by the caller; `avz-cli` renders that as an
 //! `indicatif` bar, and a future GUI would render it as a widget.
 
+use crate::render::AdapterKind;
+
 /// The phases a render moves through, in order (`VISION.md` §8).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Phase {
@@ -42,6 +44,13 @@ pub trait Progress: Send + Sync {
 
     /// An actionable, non-fatal warning the user should see.
     fn warn(&self, message: &str);
+
+    /// The renderer settled on an adapter, before the first frame. `kind` is
+    /// which side of the hardware/software line it falls on — derived from the
+    /// device's own type, never from what was requested — and `name` is the
+    /// driver's name for it (`"AMD Radeon 780M"`, `"llvmpipe (LLVM 19.1.7,
+    /// 256 bits)"`). Reported once per render.
+    fn adapter_selected(&self, kind: AdapterKind, name: &str);
 }
 
 /// A [`Progress`] that discards everything. Useful in tests and library callers
@@ -54,6 +63,7 @@ impl Progress for NoopProgress {
     fn advance(&self, _phase: Phase, _units: u64) {}
     fn phase_finished(&self, _phase: Phase) {}
     fn warn(&self, _message: &str) {}
+    fn adapter_selected(&self, _kind: AdapterKind, _name: &str) {}
 }
 
 #[cfg(test)]
@@ -67,6 +77,7 @@ mod tests {
         progress.advance(Phase::Analyzing, 1);
         progress.phase_finished(Phase::Analyzing);
         progress.warn("nothing to see here");
+        progress.adapter_selected(AdapterKind::Software, "llvmpipe");
     }
 
     #[test]

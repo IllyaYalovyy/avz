@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use avz_core::config::{ConfigLayer, Sources};
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
+use avz_core::render::AdapterKind;
 use avz_core::{Error, Phase, Progress};
 
 use crate::cli::RenderArgs;
@@ -101,6 +102,21 @@ fn describe(summary: &RenderSummary) -> String {
     )
 }
 
+/// The one line that says who is doing the drawing.
+///
+/// Printed before the first frame, because hardware-versus-software is the
+/// difference between a render that takes minutes and one that takes the
+/// evening (`VISION.md` §7) — the user should learn which they got at the
+/// start, not from the clock.
+fn announce(kind: AdapterKind, name: &str) -> String {
+    match kind {
+        AdapterKind::Hardware => format!("rendering on {name} — hardware GPU"),
+        AdapterKind::Software => {
+            format!("rendering on {name} — software rasterizer, no GPU")
+        }
+    }
+}
+
 /// [`Progress`] rendered as terminal output.
 ///
 /// Phases go to `tracing`, which already writes to stderr and already honours
@@ -114,6 +130,12 @@ struct Terminal {
 impl Terminal {
     /// Whether a warning reaches the user.
     fn shows_warnings(&self) -> bool {
+        !self.quiet
+    }
+
+    /// Whether the adapter announcement reaches the user. It is information,
+    /// not an error, so `--quiet` silences it.
+    fn shows_adapter(&self) -> bool {
         !self.quiet
     }
 }
@@ -137,13 +159,17 @@ impl Progress for Terminal {
             eprintln!("warning: {message}");
         }
     }
+
+    fn adapter_selected(&self, kind: AdapterKind, name: &str) {
+        if self.shows_adapter() {
+            println!("{}", announce(kind, name));
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::fs;
-
-    use avz_core::render::AdapterKind;
 
     use super::*;
 
@@ -214,5 +240,31 @@ mod tests {
     fn only_a_loud_render_shows_warnings() {
         assert!(Terminal { quiet: false }.shows_warnings());
         assert!(!Terminal { quiet: true }.shows_warnings());
+    }
+
+    /// The announcement names the adapter and says plainly which side of the
+    /// hardware/software line it falls on — that distinction is minutes versus
+    /// hours on a long render (`VISION.md` §7).
+    #[test]
+    fn a_hardware_adapter_is_announced_as_a_real_gpu() {
+        assert_eq!(
+            announce(AdapterKind::Hardware, "AMD Radeon 780M"),
+            "rendering on AMD Radeon 780M — hardware GPU"
+        );
+    }
+
+    #[test]
+    fn a_software_adapter_is_announced_as_cpu_emulation() {
+        assert_eq!(
+            announce(AdapterKind::Software, "llvmpipe (LLVM 19.1.7, 256 bits)"),
+            "rendering on llvmpipe (LLVM 19.1.7, 256 bits) — software rasterizer, no GPU"
+        );
+    }
+
+    /// The announcement is information, not an error, so `--quiet` silences it.
+    #[test]
+    fn only_a_loud_render_announces_its_adapter() {
+        assert!(Terminal { quiet: false }.shows_adapter());
+        assert!(!Terminal { quiet: true }.shows_adapter());
     }
 }

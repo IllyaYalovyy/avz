@@ -73,6 +73,8 @@ fn a_two_second_software_render_is_a_playable_mp4_with_one_video_and_one_audio_s
         .args(["--sample", SAMPLE, "--adapter", "software"])
         .assert()
         .success()
+        .stdout(contains("rendering on"))
+        .stdout(contains("software rasterizer"))
         .stdout(contains(format!("{FRAMES} frames")))
         .stdout(contains(format!("{SAMPLE_SECS:.2}s")));
 
