@@ -20,7 +20,7 @@ use crate::analysis::{self, EnvelopeParams};
 use crate::config::{Config, SampleRange, Seed};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::render::{
-    AdapterChoice, AdapterKind, Backdrop, Compositor, Globals, Gpu, Layer, Offscreen, Preset,
+    AdapterChoice, AdapterKind, Background, Compositor, Globals, Gpu, Layer, Offscreen, Preset,
     Visualizer, palette,
 };
 use crate::{Error, Phase, Progress, Result};
@@ -86,11 +86,13 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let config = request.config;
     let fps = config.output.fps;
     // Before decoding a five-minute song: a typo'd preset name, an unknown
-    // parameter, a value outside its range, or an unknown palette are all the
-    // user's arguments, and they should hear about them in the first millisecond.
+    // parameter, a value outside its range, an unknown palette, or a background
+    // image that is not there are all the user's arguments, and they should hear
+    // about them in the first millisecond.
     let preset = Preset::by_name(&config.visual.preset)?;
     let params = preset.schema()?.resolve(&config.visual.params)?;
     let palette = palette::resolve(&config.visual.palette)?;
+    let background = Background::load(&config.background)?;
 
     progress.phase_started(Phase::Analyzing, None);
     let audio = analysis::decode(request.input)?;
@@ -111,10 +113,11 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
     let resolution = config.output.resolution;
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
 
-    // The layer stack, bottom to top (`VISION.md` §5.3). The background image and
-    // video (RFC-001 Step 19, NG2) replace the backdrop below; the text card
-    // (Step 20) is appended above the visualizer. Both are entries in this slice.
-    let background = Backdrop::default().layer(&gpu, resolution.width, resolution.height, palette);
+    // The layer stack, bottom to top (`VISION.md` §5.3). The background layer is
+    // the palette backdrop with `background.image` fitted over it; the looped
+    // video (RFC-001 NG2) and the text card (Step 20) are further entries in
+    // this slice.
+    let background = background.layer(&gpu, resolution.width, resolution.height, palette);
     let visual = Layer::new(&gpu, resolution.width, resolution.height, "avz visualizer");
     let visualizer = Visualizer::new(&gpu, preset, &visual)?;
     let compositor = Compositor::new(&gpu, &[&background, &visual])?;

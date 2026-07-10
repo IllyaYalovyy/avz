@@ -150,6 +150,31 @@ which is the only thing that distinguishes "no background layer was drawn" from
 the loop with the real `pulse`: on a silent frame its layer is transparent, and
 the composited frame is byte-for-byte the backdrop alone.
 
+**The background image.** The layer is built on the CPU, once per render, so
+`crates/avz-core/src/render/background.rs` can test the whole of it as a pure
+function from a palette, an image, and a frame size to the bytes the texture
+holds — no GPU in the way. `place` is separated out because the fit modes are
+integer geometry and nothing else: `cover` is asserted as a *crop* rather than as
+an oversized scale, which is the decision that keeps a 1×1000 source from
+allocating sixty gigabytes on its way into a 1080p frame.
+
+The rest of the module's tests exist because every step is a place where sRGB
+bytes could be mistaken for light. `darken_dims_the_light_rather_than_the_encoded_byte`
+and `a_blur_averages_light_rather_than_encoded_bytes` both pin the same mistake
+from opposite sides: half the photons of white is `#bc`, and any test that
+accepted `#80` would accept a background a stop and a half too dark.
+`a_blur_of_a_flat_field_darkens_no_edge` catches a kernel that pulls black in
+from outside the frame and vignettes every render.
+`a_contained_image_letterboxes_onto_the_palette_backdrop` and
+`a_transparent_image_lets_the_backdrop_through` pin the one design decision in
+the module — that the image is drawn *over* the backdrop rather than instead of
+it, so a letterbox bar and a hole in a PNG are the same thing.
+
+`a_background_image_reaches_the_rendered_frames` in `pipeline_render.rs` is what
+says the layer is actually in the stack. It compares against the same render
+without the image rather than probing one pixel, because `pulse` draws over the
+background and no single pixel is guaranteed to be the image alone.
+
 The preset side of that contract is
 `every_preset_draws_a_layer_the_backdrop_shows_through` in `golden_frames.rs`. A
 shader that ends `return vec4<f32>(color, 1.0)` compiles, renders, and hashes
@@ -335,6 +360,15 @@ exists, or `TODO` / `manual` with a reason.
 | ffmpeg dies mid-render, or the finished file cannot be moved into place | Half-written `.mp4` left on disk | Integration | `ffmpeg_death_midrender_leaves_no_output_file`, `a_dropped_encoder_kills_ffmpeg_and_removes_the_part_file`, `a_render_that_cannot_be_moved_into_place_leaves_no_part_file`, `the_output_appears_only_after_a_successful_finish` |
 | ffmpeg's stderr pipe fills while avz waits to write a frame | Render deadlocks with no diagnostic | Integration | `ffmpeg_death_midrender_leaves_no_output_file` (surfaces the drained stderr) |
 | Audio re-encoded instead of `-c:a copy` | Generational quality loss, silently | Integration (bitstream compare) + unit + quality hook | `muxed_audio_stream_is_copied_not_reencoded`, `the_audio_stream_is_copied_and_never_reencoded`, `scripts/quality.d/80-audio-is-never-reencoded.sh` |
+| `background.image` reaches the config and not the frame | `--bg` is decoration; every render draws the palette gradient | Integration (pixels) | `a_background_image_reaches_the_rendered_frames`, `the_bg_flag_reaches_the_cli_config_layer` |
+| A background image is blurred or darkened in sRGB rather than in light | Every background is a stop and a half too dark, and nothing errors | Unit | `darken_dims_the_light_rather_than_the_encoded_byte`, `a_blur_averages_light_rather_than_encoded_bytes`, `darken_of_one_leaves_black`, `darkening_the_background_dims_the_rendered_frames` |
+| `fit = "cover"` scales instead of cropping | A 1×1000 source needs a 1920× enlargement; the render dies allocating the intermediate | Unit | `cover_crops_the_overhanging_axis_and_centers_what_is_left`, `a_sliver_of_an_image_still_occupies_at_least_one_pixel` |
+| A fit mode distorts, crops, or letterboxes where it should not | The user's artwork is silently the wrong shape in every video | Unit | `a_stretched_image_covers_every_pixel_of_the_frame`, `a_covering_image_leaves_no_backdrop_showing`, `a_contained_image_letterboxes_onto_the_palette_backdrop`, `an_image_shaped_like_the_frame_is_neither_cropped_nor_letterboxed`, `contain_fits_the_binding_axis_and_centers_the_rest` |
+| A `contain` letterbox or a transparent PNG shows black rather than the backdrop | The palette stops reaching the frame the moment `--bg` is passed | Unit | `a_contained_image_letterboxes_onto_the_palette_backdrop`, `a_transparent_image_lets_the_backdrop_through`, `a_half_transparent_image_blends_with_the_backdrop` |
+| The blur's edge handling pulls black in from outside the frame | Every blurred background is vignetted | Unit | `a_blur_of_a_flat_field_darkens_no_edge`, `a_blur_of_zero_leaves_the_image_untouched`, `a_blur_spreads_light_beyond_the_shape_that_emitted_it` |
+| A missing or corrupt `--bg` fails after the song is decoded, or not at all | A five-minute decode before a one-line error | Unit + integration + CLI | `a_missing_background_image_is_an_input_error_naming_the_path`, `a_file_that_is_not_an_image_is_an_input_error`, `a_missing_background_image_fails_before_the_song_is_even_decoded`, `render_with_a_missing_background_image_exits_3_and_names_the_path` |
+| `background.video` is silently ignored by the renderer that cannot draw it | The user watches a five-minute render come back without the layer they asked for | Unit + integration | `a_background_video_is_refused_with_a_message_that_says_it_is_not_built_yet`, `a_background_video_is_refused_before_the_song_is_even_decoded` |
+| `image` grows past png/jpg | A dozen untrusted-input parsers in the binary, half-supporting formats `--bg` documents away | Quality hook | `scripts/quality.d/41-background-images-stay-png-and-jpeg.sh` |
 | Background-video decode thread stalls or deadlocks | Render hangs with no diagnostic | Integration (bounded channel + timeout) | TODO |
 | A preset schema declares a parameter the shader never reads | The knob does nothing; `avz presets` documents a lie | Unit + golden frames | `every_schema_parameter_is_read_by_the_shader_that_declares_it`, `param_reaches_declared_uniform_slot` |
 | Two schema parameters claim one uniform component | The second silently overwrites the first; one knob does nothing | Unit | `two_parameters_may_not_claim_the_same_uniform_component`, `a_color_cannot_start_partway_through_its_slot`, `a_slot_beyond_the_uniform_is_rejected` |

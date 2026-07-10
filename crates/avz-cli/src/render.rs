@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use avz_core::config::{ConfigLayer, Sources, VisualLayer};
+use avz_core::config::{BackgroundLayer, ConfigLayer, Sources, VisualLayer};
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
 use avz_core::render::AdapterKind;
@@ -87,6 +87,10 @@ fn cli_layer(args: &RenderArgs) -> ConfigLayer {
         visual: VisualLayer {
             palette: args.palette.clone(),
             ..VisualLayer::default()
+        },
+        background: BackgroundLayer {
+            image: args.bg.clone(),
+            ..BackgroundLayer::default()
         },
         ..ConfigLayer::default()
     }
@@ -218,6 +222,22 @@ mod tests {
         assert_eq!(
             layer.visual.palette,
             Some(avz_core::config::Palette::Named("glacier".to_owned())),
+        );
+    }
+
+    /// `--bg art/forest.png` is the invocation `VISION.md` §3 promises. Without
+    /// this the flag parses, names a real file, and is silently dropped.
+    #[test]
+    fn the_bg_flag_reaches_the_cli_config_layer() {
+        let layer = cli_layer(&render_args(&["--bg", "art/forest.png"]));
+
+        assert_eq!(
+            layer.background.image,
+            Some(PathBuf::from("art/forest.png"))
+        );
+        assert_eq!(
+            layer.background.video, None,
+            "`--bg` names an image; the video layer is RFC-001 NG2",
         );
     }
 
