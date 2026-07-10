@@ -7,13 +7,19 @@
 use avz_core::Error;
 
 /// Process exit codes. Values are contractual — scripts depend on them.
+///
+/// `crates/avz-cli/tests/exit_codes.rs` is the matrix that holds every failure
+/// path to them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Exit {
     /// Success.
     Ok = 0,
-    /// Bad arguments or configuration.
+    /// Bad arguments or configuration — including a `--config` file that cannot
+    /// be read. The user typed something wrong, and every song will fail the
+    /// same way.
     Usage = 2,
-    /// The input file is missing, unreadable, or the wrong format.
+    /// An input file is missing, unreadable, or the wrong format: the song, or
+    /// the `--bg` image. This one song is bad; the next may be fine.
     Input = 3,
     /// Rendering or encoding failed.
     Failure = 4,

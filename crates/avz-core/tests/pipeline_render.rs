@@ -960,6 +960,90 @@ fn a_background_image_reaches_the_rendered_frames() {
     }
 }
 
+/// A background smaller than the frame renders perfectly and looks soft. The
+/// warning is the only thing standing between the user and a blurry video they
+/// will not understand, so it must fire — once, before the frames, and naming
+/// the way out.
+#[test]
+fn a_background_smaller_than_the_frame_warns_once_before_any_frame_is_drawn() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, _) = output_paths(dir.path());
+    let recorder = Recorder::default();
+
+    let mut config = config();
+    // `solid_png` is 8×8; the frame is 320×180.
+    config.background.source = Some(BackgroundSource::Image(solid_png(
+        dir.path(),
+        "small.png",
+        [0x00, 0xff, 0x00, 0xff],
+    )));
+
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &recorder,
+    )
+    .expect("a small background is a soft render, not a failed one");
+
+    let warnings = recorder.warnings();
+    assert_eq!(warnings.len(), 1, "warn once, not per frame: {warnings:?}");
+    let warning = &warnings[0];
+    assert!(warning.contains("small.png"), "name the image: {warning}");
+    assert!(warning.contains("8x8"), "name its size: {warning}");
+    assert!(warning.contains("320x180"), "name the frame: {warning}");
+    assert!(
+        warning.contains("background.blur"),
+        "say what to do: {warning}"
+    );
+}
+
+/// An image at least as large as the frame is only ever downsampled, and the
+/// user has nothing to act on. A warning here would fire on every well-made
+/// render there is.
+#[test]
+fn a_background_as_large_as_the_frame_warns_about_nothing() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ffmpeg = recording_ffmpeg(dir.path());
+    let (output, _) = output_paths(dir.path());
+    let recorder = Recorder::default();
+
+    let path = dir.path().join("large.png");
+    image::RgbaImage::from_pixel(WIDTH, HEIGHT, image::Rgba([0x00, 0xff, 0x00, 0xff]))
+        .save(&path)
+        .expect("write the background png");
+
+    let mut config = config();
+    config.background.source = Some(BackgroundSource::Image(path));
+
+    let _device = one_device_at_a_time();
+    render(
+        &RenderRequest {
+            input: &fixture_mp3(),
+            output: &output,
+            config: &config,
+            adapter: AdapterChoice::Software,
+            sample: Some(sample("0s..0.2s")),
+            ffmpeg: &ffmpeg,
+        },
+        &recorder,
+    )
+    .expect("renders");
+
+    assert!(
+        recorder.warnings().is_empty(),
+        "an exactly-sized background is not upscaled: {:?}",
+        recorder.warnings(),
+    );
+}
+
 /// `darken` is what makes the visuals read on top of a bright photograph
 /// (`VISION.md` §5.3). It reaches the pixels, and it takes light away.
 #[test]

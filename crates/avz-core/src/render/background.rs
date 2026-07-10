@@ -152,6 +152,14 @@ impl Background {
         })
     }
 
+    /// The decoded image's pixel dimensions, or `None` when there is no image.
+    ///
+    /// The pipeline compares these against the frame: an image the renderer has
+    /// to enlarge is a soft video and no error at all.
+    pub fn image_size(&self) -> Option<(u32, u32)> {
+        self.image.as_ref().map(|image| image.dimensions())
+    }
+
     /// Build the `width × height` background layer for `palette`.
     ///
     /// Opaque, so a composited frame reaches ffmpeg with alpha 255 whatever the
