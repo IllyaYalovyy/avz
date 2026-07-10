@@ -374,13 +374,45 @@ fn decode(path: &Path) -> Result<Rgba32FImage> {
         .map_err(|err| Error::Input(format!("`{}`: {err}", path.display())))?
         .decode()
         .map_err(|err| {
-            Error::Input(format!(
+            let message = format!(
                 "`{}` is not a background image avz can read: {err}",
                 path.display(),
-            ))
+            );
+            // The most likely way to arrive here with a video is `--bg`, whose
+            // owner needs the spelling that works, not just the failure.
+            let message = if looks_like_video(path) {
+                format!(
+                    "{message}; a still image was expected — a looped, muted background \
+                     video is `background.video`: pass `--set background.video={}` or \
+                     set it in a config file",
+                    path.display(),
+                )
+            } else {
+                message
+            };
+            Error::Input(message)
         })?;
 
     Ok(premultiplied_linear(&decoded))
+}
+
+/// Whether a file that failed to decode as an image looks like a video.
+///
+/// Judged by extension alone, and only after the image sniff has already
+/// failed: the point is to route the user to `background.video`, where ffmpeg
+/// — not avz — is the judge of the contents.
+fn looks_like_video(path: &Path) -> bool {
+    const VIDEO_EXTENSIONS: [&str; 9] = [
+        "mp4", "m4v", "mkv", "webm", "mov", "avi", "mpg", "mpeg", "wmv",
+    ];
+
+    path.extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .is_some_and(|extension| {
+            VIDEO_EXTENSIONS
+                .iter()
+                .any(|video| extension.eq_ignore_ascii_case(video))
+        })
 }
 
 /// An sRGB image as premultiplied linear light.
@@ -902,5 +934,57 @@ mod tests {
         let background = Background::load(&config).expect("a video needs no decoding here");
 
         assert_eq!(background.image_size(), None);
+    }
+
+    /// Found in the v0.1 e2e pass (#30): `--bg loop.mp4` failed with a message
+    /// that never said `background.video` exists. When the file that failed to
+    /// decode smells like a video, the error must hand over the spelling that
+    /// works, not just the fact of the failure (`AGENTS.md`, actionable
+    /// warnings).
+    #[test]
+    fn a_video_handed_to_background_image_points_at_background_video() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let clip = dir.path().join("loop.mp4");
+        std::fs::write(&clip, b"\x00\x00\x00\x18ftypisom, not an image").expect("write");
+
+        let err = decode(&clip).expect_err("an mp4 is not an image");
+        let message = err.to_string();
+        assert!(
+            message.contains("still image"),
+            "say what `background.image` wanted: {message}"
+        );
+        assert!(
+            message.contains("`background.video`"),
+            "name the key that takes a video: {message}"
+        );
+        assert!(
+            message.contains("--set background.video="),
+            "say how to pass it from the command line: {message}"
+        );
+    }
+
+    /// The hint is earned by the extension. A corrupt image is its own problem,
+    /// and pointing its owner at `background.video` would send them the wrong
+    /// way.
+    #[test]
+    fn a_corrupt_image_does_not_get_the_video_hint() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let broken = dir.path().join("art.png");
+        std::fs::write(&broken, b"not a png at all").expect("write");
+
+        let err = decode(&broken).expect_err("garbage is not an image");
+        let message = err.to_string();
+        assert!(
+            !message.contains("background.video"),
+            "a bad image is not a video problem: {message}"
+        );
+    }
+
+    #[test]
+    fn the_video_hint_is_judged_by_extension_case_insensitively() {
+        assert!(looks_like_video(Path::new("LOOP.MP4")));
+        assert!(looks_like_video(Path::new("clip.WebM")));
+        assert!(!looks_like_video(Path::new("art.png")));
+        assert!(!looks_like_video(Path::new("no-extension")));
     }
 }
