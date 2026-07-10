@@ -28,4 +28,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("nebula.wgsl"),
         schema: include_str!("nebula.json"),
     },
+    Preset {
+        name: "ribbons",
+        description: "classic and reactive: a stack of ribbons displaced by the song's own spectrum",
+        source: include_str!("ribbons.wgsl"),
+        schema: include_str!("ribbons.json"),
+    },
 ];

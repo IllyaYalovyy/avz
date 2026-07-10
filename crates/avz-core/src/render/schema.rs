@@ -40,6 +40,14 @@ pub struct PresetSchema {
     /// that leaves it false gets neither, and a shader that reaches for them
     /// anyway fails to build rather than sampling whatever was there.
     pub needs_feedback: bool,
+    /// Whether the preset samples this frame's coarse spectrum (`VISION.md` §6).
+    ///
+    /// The other binding a preset may ask for: a `512×1` texture of the frame's
+    /// log-spaced spectrum, at `@binding(3)`, read with `textureLoad`. Independent
+    /// of [`Self::needs_feedback`] — a preset may ask for either, both, or
+    /// neither — and, like it, a shader that reaches for the binding without
+    /// declaring it fails to build.
+    pub needs_spectrum: bool,
     /// What to tell a user rendering this preset on lavapipe (`VISION.md` §7).
     pub perf_hint: Option<String>,
 }
@@ -211,6 +219,7 @@ impl PresetSchema {
             preset: preset.to_owned(),
             params,
             needs_feedback: raw.needs_feedback,
+            needs_spectrum: raw.needs_spectrum,
             perf_hint: raw.perf_hint,
         })
     }
@@ -381,6 +390,8 @@ struct RawSchema {
     params: Vec<RawParam>,
     #[serde(default)]
     needs_feedback: bool,
+    #[serde(default)]
+    needs_spectrum: bool,
     #[serde(default)]
     perf_hint: Option<String>,
 }
@@ -746,6 +757,26 @@ mod tests {
         let asked = PresetSchema::parse("test", r##"{"needs_feedback":true,"params":[]}"##)
             .expect("a schema may ask for the previous frame");
         assert!(asked.needs_feedback);
+    }
+
+    /// `VISION.md` §6: so is the spectrum texture, and the two are independent —
+    /// `ribbons` wants the spectrum and no trail, `nebula` the trail and no
+    /// spectrum, and a preset may one day want both.
+    #[test]
+    fn the_spectrum_texture_is_off_unless_the_schema_asks_for_it() {
+        assert!(!every_type().needs_spectrum, "no `needs_spectrum` key");
+
+        let asked = PresetSchema::parse("test", r##"{"needs_spectrum":true,"params":[]}"##)
+            .expect("a schema may ask for the spectrum");
+        assert!(asked.needs_spectrum);
+        assert!(!asked.needs_feedback, "asking for one asks for one");
+
+        let both = PresetSchema::parse(
+            "test",
+            r##"{"needs_feedback":true,"needs_spectrum":true,"params":[]}"##,
+        )
+        .expect("a schema may ask for both");
+        assert!(both.needs_feedback && both.needs_spectrum);
     }
 
     #[test]

@@ -200,8 +200,8 @@ checks that its `struct Globals` still spells out the `VISION.md` §6 members,
 because a preset that renamed one would compile against its own struct and read
 the wrong feature at that offset.
 
-**The feedback texture.** The one binding beyond the uniform a preset may ask
-for (`VISION.md` §6). `crates/avz-core/tests/feedback_texture.rs` pins the
+**The feedback texture.** One of the two bindings beyond the uniform a preset may
+ask for (`VISION.md` §6). `crates/avz-core/tests/feedback_texture.rs` pins the
 renderer's half against test presets built in the test itself rather than against
 `nebula`: that frame 0 samples black, that frame N samples frame N-1, and that a
 preset which did not declare `needs_feedback` fails to build if it reaches for
@@ -210,6 +210,24 @@ is `nebula_frames_depend_on_the_frames_before_them`, which renders frame 30 warm
 and cold and demands they differ. Neither is redundant: the plumbing tests would
 pass against a `nebula` that never sampled, and the `nebula` test would pass
 against plumbing that leaked an uncleared texture into frame 0.
+
+**The spectrum texture.** The other one, and it is tested in the same two halves
+for the same reason. `crates/avz-core/tests/spectrum_texture.rs` pins the
+renderer's half against a test shader that paints each column of the frame with
+the bucket that column stands for, so the frame *is* the spectrum row: bucket `n`
+reaches texel `n` unsmeared, the row uploaded is the frame being drawn rather
+than the render's first, silence draws black, and a preset that did not declare
+`needs_spectrum` fails to build if it reaches for `@binding(3)` anyway. Because
+the two bindings are independent, one test asks for both at once and demands the
+feedback binding did not move out from under the shader.
+
+The preset's half is `ribbons_draws_its_light_where_the_spectrum_has_energy`,
+which puts energy in the lowest buckets and then the highest and demands the
+light move from the left of the frame to the right — the frequency axis is the
+frame's width, and a `ribbons` wired backwards passes every hash.
+`ribbons_draws_nothing_where_the_spectrum_is_silent` is the other direction: a
+preset that drew its lanes whatever the texture said would satisfy the golden
+hashes and ignore the music.
 
 The Rust side of that boundary is
 `globals_layout_matches_wgsl`, which pins every member's byte offset — the
@@ -430,6 +448,11 @@ exists, or `TODO` / `manual` with a reason.
 | Nondeterminism leaks in (wall clock, unseeded RNG) | Re-render does not reproduce; golden tests flake | Golden frames + quality hook | `same_inputs_same_hash_twice`, `scripts/quality.d/90-animation-time-comes-from-the-frame-index.sh` |
 | The `Globals` uniform drifts between the Rust struct and the WGSL | Every preset silently reads the wrong feature at that offset, and nothing crashes | Unit + integration | `globals_layout_matches_wgsl`, `the_palette_and_param_arrays_sit_on_sixteen_byte_boundaries`, `every_preset_declares_the_whole_globals_contract`, `every_feature_pulse_reacts_to_changes_the_frame` |
 | A preset ignores a feature it claims to be driven by | The kick, or the cymbals, drive nothing; the video looks alive and reacts to half the song | Integration (pixels) | `every_feature_pulse_reacts_to_changes_the_frame` |
+| The coarse spectrum is bucketed linearly, or off by a factor of two | The whole kick lands in two texels and `ribbons` reads hiss as loud as a snare — plausible, and wrong at every frequency | Unit | `a_tone_lights_the_coarse_bucket_that_holds_its_frequency`, `the_buckets_are_log_spaced_across_the_declared_range`, `a_bucket_averages_its_bins_rather_than_summing_them`, `a_bucket_narrower_than_one_fft_bin_reads_the_bin_nearest_it` |
+| The spectrum texture is uploaded once, or a row short, or byte-swapped | A preset draws a still ribbon over a moving song, or reads off the end of its own texture | Unit + integration (pixels) | `every_video_frame_carries_a_512_bucket_spectrum`, `a_hot_bucket_lights_the_column_that_reads_it_and_no_other`, `the_texture_carries_the_spectrum_of_the_frame_being_drawn` |
+| A preset reaches for an optional binding it never declared, or declares one it never reads | A shader samples a texture nobody bound, or every frame pays for an upload that shows nothing | Unit + integration | `a_preset_that_does_not_ask_for_the_spectrum_gets_no_binding`, `a_preset_asks_for_the_spectrum_texture_exactly_when_its_shader_samples_it`, `a_preset_may_ask_for_the_spectrum_and_the_previous_frame_together` |
+| `ribbons` stops reading the spectrum, or reads its frequency axis backwards | The golden hashes are blessed over a preset that draws flat lines and ignores the music | Integration (pixels) | `ribbons_draws_its_light_where_the_spectrum_has_energy`, `ribbons_draws_nothing_where_the_spectrum_is_silent` |
+| The spectrogram's global normalization divides by a silent song's zero spread | A `NaN` reaches the texture and every ribbon paints black | Unit | `a_silent_song_has_a_zero_spectrum_and_no_nans`, `the_spectrum_is_normalized_into_the_unit_interval` |
 | `--seed` never reaches the shader's noise | Two seeds render the same video; `--seed` is decoration | Integration (pixels) | `different_seed_different_hash` |
 | A golden test renders on a hardware adapter | The committed hashes are a hash of one laptop; the test fails everywhere else for reasons that look like shader bugs | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |
 | A preset ships with no golden hashes | The one thing that catches shader drift does not cover the new preset | Quality hook | `scripts/quality.d/95-golden-frames-run-on-the-software-adapter.sh` |

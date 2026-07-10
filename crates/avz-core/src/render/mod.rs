@@ -13,6 +13,10 @@
 //! paint for themselves. The [`TextCard`] on top of it is rasterized once and
 //! then only animated.
 //!
+//! A preset draws against the uniform and, if its schema asks, against the two
+//! optional textures `VISION.md` §6 allows it: the previous frame
+//! ([`Feedback`]) and this frame's coarse spectrum ([`Spectrum`]).
+//!
 //! Animation time is always `frame_index / fps`, never wall clock. Readback
 //! row-padding (256-byte alignment) is handled in exactly one place:
 //! [`readback::RowLayout`].
@@ -30,6 +34,7 @@ pub mod palette;
 pub mod preset;
 pub mod readback;
 pub mod schema;
+pub mod spectrum;
 pub mod text;
 
 pub use adapter::{AdapterChoice, AdapterKind};
@@ -43,4 +48,5 @@ pub use palette::{BUILT_INS, BuiltIn, LinearPalette};
 pub use preset::{PRESETS, Preset, Visualizer};
 pub use readback::RowLayout;
 pub use schema::{PackedParams, Param, ParamKind, PresetSchema, SLOT_COMPONENTS, Slot};
+pub use spectrum::Spectrum;
 pub use text::{Card, CardText, TextCard};

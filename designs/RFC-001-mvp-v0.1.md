@@ -38,6 +38,10 @@ developed test-first per `docs/TESTING.md`.
 - **NG1** - The four remaining v1 presets (`ribbons`, `particles`, `kaleido`,
   `ink`) and the spectrum texture binding only `ribbons` consumes. Tracked as
   backlog issues; adding them later must not require core changes (that is G3).
+  **Partly landed post-MVP (issue #24):** the spectrum texture binding and
+  `ribbons`. The binding was core work, as this non-goal anticipated — it is the
+  last generic binding planned — and `ribbons` itself was three files in
+  `presets/`, which is G3 holding. `particles`, `kaleido`, and `ink` remain.
 - **NG2** - Looped background video. The layer-stack design accounts for it, but
   the second-ffmpeg-reader thread ships post-MVP.
 - **NG3** - Codec matrix beyond x264 (`--codec x265|av1` deferred; `--quality`
