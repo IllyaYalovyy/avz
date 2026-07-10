@@ -8,8 +8,15 @@
 //! touches nothing outside `presets/` (RFC-001 G3). No pipeline, binding, or
 //! compositor code moves (`AGENTS.md`, rendering).
 //!
+//! Beyond the uniform, a preset may ask for one thing: the previous frame, by
+//! declaring `"needs_feedback": true` in its schema. That binds
+//! [`Feedback`](crate::render::Feedback) at `@binding(1)` and its sampler at
+//! `@binding(2)`. The declaration is data, so asking for it is still a change to
+//! `presets/` alone.
+//!
 //! The palette that fills `Globals::palette` arrives in RFC-001 Step 16.
 
+use crate::render::feedback::Feedback;
 use crate::render::globals::{GLOBALS_SIZE, Globals};
 use crate::render::offscreen::{FRAME_FORMAT, Gpu, Offscreen};
 use crate::render::schema::PresetSchema;
@@ -74,24 +81,39 @@ pub fn names() -> Vec<&'static str> {
 /// A preset's render pipeline, its uniform buffer, and its bind group.
 ///
 /// Built once per render and reused for every frame: only the uniform's bytes
-/// change between frames.
+/// change between frames. A preset whose schema declares `needs_feedback` also
+/// owns the [`Feedback`] history its shader samples, which is per-render state —
+/// a second `Visualizer` starts its trails from black again.
 #[derive(Debug)]
 pub struct Visualizer {
     pipeline: wgpu::RenderPipeline,
     uniforms: wgpu::Buffer,
     bindings: wgpu::BindGroup,
+    feedback: Option<Feedback>,
 }
 
 impl Visualizer {
-    /// Compile `preset` and build everything it needs to draw.
+    /// Compile `preset` and build everything it needs to draw into `target`.
+    ///
+    /// `target` is taken here rather than only at [`Visualizer::draw`] because a
+    /// feedback preset's history texture must match the frame it mirrors, and a
+    /// render has exactly one frame size.
     ///
     /// # Errors
     ///
-    /// [`Error::Render`] if the shader does not compile or link. The presets are
-    /// embedded, so that is a bug rather than bad user input — but a message
+    /// [`Error::Config`] if the preset's embedded schema does not parse, and
+    /// [`Error::Render`] if the shader does not compile or link — including when
+    /// it samples `@binding(1)` without declaring `needs_feedback`. The presets
+    /// are embedded, so both are bugs rather than bad user input, but a message
     /// beats a panic on a driver that rejects what naga accepted.
-    pub fn new(gpu: &Gpu, preset: &Preset) -> Result<Self> {
+    pub fn new(gpu: &Gpu, preset: &Preset, target: &Offscreen) -> Result<Self> {
         let device = gpu.device();
+
+        let frame = target.layout();
+        let feedback = preset
+            .schema()?
+            .needs_feedback
+            .then(|| Feedback::new(gpu, frame.width(), frame.height()));
 
         let errors = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
@@ -100,20 +122,25 @@ impl Visualizer {
             source: wgpu::ShaderSource::Wgsl(preset.source.into()),
         });
 
+        let mut layout_entries = vec![wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                // The driver checks the WGSL struct against this size, so a
+                // layout drift is caught at pipeline creation, not in pixels.
+                min_binding_size: wgpu::BufferSize::new(GLOBALS_SIZE as u64),
+            },
+            count: None,
+        }];
+        if feedback.is_some() {
+            layout_entries.extend(Feedback::layout_entries());
+        }
+
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("avz globals"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    // The driver checks the WGSL struct against this size, so a
-                    // layout drift is caught at pipeline creation, not in pixels.
-                    min_binding_size: wgpu::BufferSize::new(GLOBALS_SIZE as u64),
-                },
-                count: None,
-            }],
+            entries: &layout_entries,
         });
 
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
@@ -123,13 +150,18 @@ impl Visualizer {
             mapped_at_creation: false,
         });
 
+        let mut entries = vec![wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniforms.as_entire_binding(),
+        }];
+        if let Some(feedback) = &feedback {
+            entries.extend(feedback.bindings());
+        }
+
         let bindings = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("avz globals"),
             layout: &layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: uniforms.as_entire_binding(),
-            }],
+            entries: &entries,
         });
 
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -176,6 +208,7 @@ impl Visualizer {
             pipeline,
             uniforms,
             bindings,
+            feedback,
         })
     }
 
@@ -183,6 +216,10 @@ impl Visualizer {
     ///
     /// The fullscreen triangle covers every pixel, so the frame needs no clear of
     /// its own; the `Clear` below only gives the pass a defined load op.
+    ///
+    /// A feedback preset samples the frame drawn by the previous call — black on
+    /// the first — and this call's frame becomes the next one's history. Frames
+    /// must therefore be drawn in order, which is what `pipeline::render` does.
     pub fn draw(&self, gpu: &Gpu, target: &Offscreen, globals: &Globals) {
         gpu.queue()
             .write_buffer(&self.uniforms, 0, &globals.to_bytes());
@@ -214,6 +251,10 @@ impl Visualizer {
             pass.set_pipeline(&self.pipeline);
             pass.set_bind_group(0, &self.bindings, &[]);
             pass.draw(0..3, 0..1);
+        }
+
+        if let Some(feedback) = &self.feedback {
+            feedback.capture(&mut encoder, target);
         }
 
         gpu.queue().submit([encoder.finish()]);
@@ -328,6 +369,36 @@ mod tests {
                     param.name,
                 );
             }
+        }
+    }
+
+    /// The schema's `needs_feedback` and the shader's `@binding(1)` are two
+    /// halves of one decision, and only the schema half reaches the renderer.
+    ///
+    /// A shader that samples a binding its schema did not ask for fails to build
+    /// (`a_preset_that_does_not_ask_for_feedback_gets_no_binding`), which is
+    /// loud. The other direction is silent: a schema that asks for the previous
+    /// frame while its shader never reads it costs a full-resolution texture and
+    /// a per-frame copy for nothing.
+    #[test]
+    fn a_preset_asks_for_the_feedback_texture_exactly_when_its_shader_samples_it() {
+        for preset in PRESETS {
+            let schema = preset.schema().expect("a shipped schema parses");
+            let samples = preset.source.contains("@group(0) @binding(1)");
+
+            assert_eq!(
+                schema.needs_feedback,
+                samples,
+                "preset `{}` declares `needs_feedback: {}` but its WGSL {} the \
+                 previous-frame binding",
+                preset.name,
+                schema.needs_feedback,
+                if samples {
+                    "declares"
+                } else {
+                    "does not declare"
+                },
+            );
         }
     }
 

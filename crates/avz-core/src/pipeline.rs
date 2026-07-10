@@ -105,7 +105,7 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
 
     let resolution = config.output.resolution;
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
-    let visualizer = Visualizer::new(&gpu, preset)?;
+    let visualizer = Visualizer::new(&gpu, preset, &target)?;
     let seed = seed_value(config.visual.seed);
 
     let settings = EncodeSettings {

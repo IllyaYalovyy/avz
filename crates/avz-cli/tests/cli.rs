@@ -301,7 +301,26 @@ fn presets_command_lists_all_registered() {
         .assert()
         .success()
         .stdout(contains("pulse"))
-        .stdout(contains("concentric rings driven by the kick"));
+        .stdout(contains("concentric rings driven by the kick"))
+        .stdout(contains("nebula"))
+        .stdout(contains("an fbm flow field over feedback trails"));
+}
+
+/// `nebula`'s schema reaches the terminal too, perf hint and all: a preset that
+/// is registered but whose parameters nobody can discover is undiscoverable.
+#[test]
+fn presets_nebula_prints_its_schema_and_perf_hint() {
+    avz()
+        .args(["presets", "nebula"])
+        .assert()
+        .success()
+        .stdout(contains("trail_decay"))
+        .stdout(contains(
+            "How much of the previous frame survives into this one.",
+        ))
+        .stdout(contains("octaves"))
+        .stdout(contains("burst_strength"))
+        .stdout(contains("performance:"));
 }
 
 /// UT-004, second half: name, type, default, range, and description, for every

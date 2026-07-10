@@ -112,6 +112,12 @@ The feature frames are *hand-written*, not analyzed from the fixture. That is
 the point: a golden frame whose input came out of the DSP would be rewritten by
 every change to the DSP, and would then stop saying anything about the shader.
 
+A preset whose schema declares `needs_feedback` is drawn from frame 0 up to the
+golden frame, and only the last frame is hashed. Hashing `nebula`'s frame 100 in
+isolation would pin a picture with no trails in it, which is to say none of what
+the preset is for — and a shader that quietly stopped sampling the previous frame
+would still match its hashes.
+
 **Regenerating golden hashes.** When a preset changes on purpose:
 
 ```bash
@@ -141,7 +147,20 @@ schema's own defaults render, so a default that drifts away from the constant it
 replaced fails there rather than in a video nobody re-watches. `every_preset_declares_the_whole_globals_contract`
 checks that its `struct Globals` still spells out the `VISION.md` §6 members,
 because a preset that renamed one would compile against its own struct and read
-the wrong feature at that offset. The Rust side of that boundary is
+the wrong feature at that offset.
+
+**The feedback texture.** The one binding beyond the uniform a preset may ask
+for (`VISION.md` §6). `crates/avz-core/tests/feedback_texture.rs` pins the
+renderer's half against test presets built in the test itself rather than against
+`nebula`: that frame 0 samples black, that frame N samples frame N-1, and that a
+preset which did not declare `needs_feedback` fails to build if it reaches for
+`@binding(1)` anyway. The preset's half — that `nebula` is actually wired to it —
+is `nebula_frames_depend_on_the_frames_before_them`, which renders frame 30 warm
+and cold and demands they differ. Neither is redundant: the plumbing tests would
+pass against a `nebula` that never sampled, and the `nebula` test would pass
+against plumbing that leaked an uncleared texture into frame 0.
+
+The Rust side of that boundary is
 `globals_layout_matches_wgsl`, which pins every member's byte offset — the
 uniform is encoded by hand, field by field, since `avz-core` is
 `forbid(unsafe_code)` and cannot transmute a `#[repr(C)]` struct into bytes.
