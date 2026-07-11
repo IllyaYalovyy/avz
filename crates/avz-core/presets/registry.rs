@@ -142,4 +142,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("motes.wgsl"),
         schema: include_str!("motes.json"),
     },
+    Preset {
+        name: "fireflies",
+        description: "a few wandering lights that blink to themselves and flare gently on the hits",
+        source: include_str!("fireflies.wgsl"),
+        schema: include_str!("fireflies.json"),
+    },
 ];

@@ -686,6 +686,35 @@ cheapest presets; the resolution is the only cost
 | `glow` | float | `0.5` | `0..2` | How far the faint halo around each mote reaches. |
 | `brightness` | float | `0.6` | `0..1.5` | How much light the song lifts into the dust. |
 
+## `fireflies`
+
+> a few wandering lights that blink to themselves and flare gently on the hits
+
+A dozen faint lamps wandering slow, closed-form paths, each blinking on its
+own shy cycle; every hit flares a seeded half of the swarm, softly. The mids
+lift them into view and silence puts them out. Firefly amber by default —
+raise `tint` to color them from the palette.
+
+```bash
+avz render song.mp3 --preset fireflies --bg art/cover.jpg
+avz render song.mp3 --preset fireflies --set flies=20 --set blink=0.5 --set flare=1.5
+```
+
+**Performance:** every pixel visits each fly, so frame time scales with
+`flies` — the default dozen is negligible; on software rendering keep it
+under 20 at 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `flies` | int | `12` | `2..24` | How many fireflies wander the frame. |
+| `size` | float | `0.008` | `0.002..0.03` | How wide a fly's lamp is, as a fraction of the short edge. |
+| `wander` | float | `0.6` | `0.1..1.2` | How far the swarm spreads and roams from the middle. |
+| `pace` | float | `0.05` | `0.01..0.3` | How fast the flies wander. |
+| `blink` | float | `0.25` | `0.02..1` | How often a fly's lamp cycles, in blinks per second. |
+| `flare` | float | `0.8` | `0..2` | How much a hit flares this second's half of the swarm. |
+| `tint` | float | `0.35` | `0..1` | How much of the palette colors the lamps; 0 is firefly amber. |
+| `brightness` | float | `0.7` | `0..1.5` | How much light the song lifts into the swarm. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

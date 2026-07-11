@@ -1,0 +1,6 @@
+# Golden frame hashes for the `fireflies` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 26b8b536f89f4075daed0a5ffd39e9fe0b3f5769d48c7c5ea472d70fb9961189
+10 05440f19d4acb243b2c6726cb0e902221879996b08bf289d81a04b5e220c8b3a
+100 edfce35311eb2f42c6deeec573b162529177ce95a1ec507d810f5d1bc130f9fa

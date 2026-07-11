@@ -12,6 +12,9 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`fireflies`** (#47). A dozen lamps on closed-form wander paths, blinking
+  shy seeded cycles; each hit flares a seeded half of the swarm, gently.
+
 - **`motes`** (#46). Drifting dust in two depth layers, lifted by the mids,
   glinted by the air band, indifferent to hits — the quietest preset avz
   ships.
