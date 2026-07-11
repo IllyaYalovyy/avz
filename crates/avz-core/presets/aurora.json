@@ -1,0 +1,101 @@
+{
+  "perf_hint": "a few octaves of value noise per curtain and no textures \u2014 frame time scales with pixel count and `curtains`; on software rendering preview with `--sample 10s` before committing to 1080p",
+  "params": [
+    {
+      "name": "curtains",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 4,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "How many curtains hang across the sky."
+    },
+    {
+      "name": "scale",
+      "type": "float",
+      "default": 1.6,
+      "min": 0.4,
+      "max": 6.0,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How tightly the curtains meander."
+    },
+    {
+      "name": "drift",
+      "type": "float",
+      "default": 0.25,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How fast the curtains travel when nothing is playing."
+    },
+    {
+      "name": "sway",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How much deeper the bass swings the curtains."
+    },
+    {
+      "name": "shimmer",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How hard the air band flickers the curtains' folds."
+    },
+    {
+      "name": "drape",
+      "type": "float",
+      "default": 0.5,
+      "min": 0.05,
+      "max": 1.5,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How far the light hangs down from each curtain's rim."
+    },
+    {
+      "name": "vignette",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "How far the corners of the frame fall off."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How much light the loudness of the song puts into the sky."
+    }
+  ]
+}

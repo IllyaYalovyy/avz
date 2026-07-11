@@ -1,0 +1,6 @@
+# Golden frame hashes for the `aurora` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 b77084e91614525fd45babde53aa60b31a4384d82fae639ffd885d7b1f11ef07
+10 cc1c0c2585eb41adba9c4f0fe3afdbf39dd53016af603fd35380701f1aa036ff
+100 620c7e54aa875478034d24e5bb748ab2a345642897b573a64a7b8242922c162b

@@ -82,4 +82,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("horizon.wgsl"),
         schema: include_str!("horizon.json"),
     },
+    Preset {
+        name: "aurora",
+        description: "curtains of aurora light swaying with the bass, shimmered by the air band",
+        source: include_str!("aurora.wgsl"),
+        schema: include_str!("aurora.json"),
+    },
 ];
