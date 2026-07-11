@@ -40,8 +40,8 @@ than freezing them. All motion is deterministic — same file, same config, same
 so the visuals read against any backdrop; where it has a `brightness`, that is
 the overall output level, applied last.
 
-**Fullscreen or panel.** The first six presets fill the frame. The last two —
-`bars` and `meter` — are *panel* presets: they own one anchored rectangle,
+**Fullscreen or panel.** Most presets fill the frame. Two — `bars` and
+`meter` — are *panel* presets: they own one anchored rectangle,
 placed by an `anchor` parameter that speaks the text card's nine-grid
 vocabulary (`top-left` through `bottom-right`), and leave every pixel outside
 it fully transparent, so a `background.image` or `background.video` shows
@@ -300,6 +300,35 @@ the resolution is what costs, not this
 | `segments` | int | `24` | `0..64` | How many LED segments divide the meter; 0 is a continuous, unbroken bar. |
 | `track` | float | `0.12` | `0..1` | How visible the unlit remainder of the meter is, so quiet passages still show the scale. |
 | `brightness` | float | `1` | `0..2` | How much light the lit segments put out. |
+
+## `tunnel`
+
+> an endless ring tunnel flown at the speed of the song, every hit a lit gate
+
+The classic bore, from the VISION backlog: rings of light receding to a
+vanishing point, flown through at a steady `speed`. The kick swells the walls
+around you, the mids stripe them, and every hit lights the gates as they pass.
+`fog` sinks the far end into darkness so the eye stays on what is arriving.
+
+```bash
+avz render song.mp3 --preset tunnel
+avz render song.mp3 --preset tunnel --set speed=2 --set twist=-1.5 --set fog=0.8
+```
+
+**Performance:** one pass over the uniform and no textures, so frame time
+scales with pixel count alone — on software rendering preview with
+`--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `speed` | float | `1` | `0..4` | How fast the tunnel is flown, in bores per second. |
+| `rings` | float | `10` | `2..24` | How many ring gates light the bore at any depth. |
+| `stripes` | int | `12` | `0..48` | How many stripes run around the walls; 0 leaves the walls dark. |
+| `twist` | float | `0.6` | `-3..3` | How hard the wall stripes spiral along the bore; negative spirals the other way. |
+| `pulse` | float | `1` | `0..3` | How hard the kick swells the walls around the viewer. |
+| `flash` | float | `1` | `0..3` | How brightly a hit lights the gates as they pass. |
+| `fog` | float | `0.55` | `0..1` | How deep the far end of the bore sinks into darkness. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the bore. |
 
 ---
 

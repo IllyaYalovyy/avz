@@ -64,4 +64,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("meter.wgsl"),
         schema: include_str!("meter.json"),
     },
+    Preset {
+        name: "tunnel",
+        description: "an endless ring tunnel flown at the speed of the song, every hit a lit gate",
+        source: include_str!("tunnel.wgsl"),
+        schema: include_str!("tunnel.json"),
+    },
 ];
