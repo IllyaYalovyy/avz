@@ -1,0 +1,6 @@
+# Golden frame hashes for the `tiles` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 76f1f93b311d6148ce57bbf0c9336a406c4736e40a1457e72e7911b0c1654169
+10 17cd7edcb5a2f8dcd7711f50380cce9436bc39fc7a75d01b6a0a406243b18d3b
+100 4895455f3bf690f0de2fa70ec3c0a270f74186144a83b186dc1b894c0d3ac261

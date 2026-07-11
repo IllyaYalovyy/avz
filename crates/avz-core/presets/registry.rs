@@ -100,4 +100,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("rain.wgsl"),
         schema: include_str!("rain.json"),
     },
+    Preset {
+        name: "tiles",
+        description: "an equalizer wall of tiles: the spectrum lit floor to ceiling across the frame",
+        source: include_str!("tiles.wgsl"),
+        schema: include_str!("tiles.json"),
+    },
 ];
