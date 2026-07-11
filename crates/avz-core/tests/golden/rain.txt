@@ -1,0 +1,6 @@
+# Golden frame hashes for the `rain` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 e0c7984e16486e476d9b4a507606ac8e202a492b07979ea40661e095a9af7032
+10 bd3ff708bbb9a6c66801c060b22e188a226a61fa8d527c2c783ee541854285b9
+100 f2cd632e1dc2268a67a3e36098f86eba946b015e4e03aad8eb1c5768f1511791

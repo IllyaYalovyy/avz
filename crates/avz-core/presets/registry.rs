@@ -94,4 +94,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("scope.wgsl"),
         schema: include_str!("scope.json"),
     },
+    Preset {
+        name: "rain",
+        description: "spectral rain: each column falls at the loudness of its own band",
+        source: include_str!("rain.wgsl"),
+        schema: include_str!("rain.json"),
+    },
 ];
