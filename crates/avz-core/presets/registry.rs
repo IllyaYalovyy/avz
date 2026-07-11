@@ -76,4 +76,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("starfield.wgsl"),
         schema: include_str!("starfield.json"),
     },
+    Preset {
+        name: "horizon",
+        description: "a synthwave sunset: a scanlined sun over a perspective grid the kick pulses",
+        source: include_str!("horizon.wgsl"),
+        schema: include_str!("horizon.json"),
+    },
 ];

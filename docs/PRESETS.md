@@ -360,6 +360,36 @@ time scales with pixel count alone — on software rendering preview with
 | `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the sky. |
 
+## `horizon`
+
+> a synthwave sunset: a scanlined sun over a perspective grid the kick pulses
+
+The genre classic: a striped sun on the horizon, a perspective floor grid
+scrolling toward the viewer, sparse stars twinkling with the air band. The
+kick pulses the grid and swells the sun, and every hit flares the horizon
+line itself. The backlog's "terrain flyover", taken as neon instead of rock.
+
+```bash
+avz render song.mp3 --preset horizon --palette ember
+avz render song.mp3 --preset horizon --set grid=10 --set scanlines=20 --set speed=1.6
+```
+
+**Performance:** one pass over the uniform and no textures, so frame time
+scales with pixel count alone — on software rendering preview with
+`--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `sun_size` | float | `0.28` | `0.05..0.6` | The sun's radius, as a fraction of the frame's short edge. |
+| `scanlines` | int | `14` | `0..40` | How many stripes cut the sun; 0 leaves it whole. |
+| `grid` | float | `6` | `2..16` | How dense the floor grid is. |
+| `speed` | float | `0.8` | `0..4` | How fast the floor scrolls toward the viewer. |
+| `pulse` | float | `1` | `0..3` | How hard the kick pulses the grid lines. |
+| `flare` | float | `1` | `0..3` | How brightly a hit flares the horizon line. |
+| `stars` | float | `1` | `0..2` | How bright the sky's stars are; the air band twinkles them. |
+| `vignette` | float | `0.35` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the scene. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

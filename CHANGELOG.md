@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`horizon`** (#36). A synthwave sunset: scanlined sun, perspective floor
+  grid scrolling toward the viewer, air-twinkled stars; the kick pulses the
+  grid, hits flare the horizon line. The backlog's terrain flyover, as neon.
+
 - **`starfield`** (#35). A warp-speed starfield in two parallax layers:
   loudness stretches the stars into warp lines, hits stretch them further, the
   air band twinkles whatever is barely moving, and silence collapses the sky
