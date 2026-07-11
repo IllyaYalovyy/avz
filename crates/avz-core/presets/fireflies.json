@@ -1,0 +1,101 @@
+{
+  "perf_hint": "every pixel visits each fly, so frame time scales with `flies` \u2014 the default dozen is negligible; on software rendering keep it under 20 at 1080p",
+  "params": [
+    {
+      "name": "flies",
+      "type": "int",
+      "default": 12,
+      "min": 2,
+      "max": 24,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "How many fireflies wander the frame."
+    },
+    {
+      "name": "size",
+      "type": "float",
+      "default": 0.008,
+      "min": 0.002,
+      "max": 0.03,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How wide a fly's lamp is, as a fraction of the short edge."
+    },
+    {
+      "name": "wander",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.1,
+      "max": 1.2,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How far the swarm spreads and roams from the middle."
+    },
+    {
+      "name": "pace",
+      "type": "float",
+      "default": 0.05,
+      "min": 0.01,
+      "max": 0.3,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How fast the flies wander."
+    },
+    {
+      "name": "blink",
+      "type": "float",
+      "default": 0.25,
+      "min": 0.02,
+      "max": 1.0,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How often a fly's lamp cycles, in blinks per second."
+    },
+    {
+      "name": "flare",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How much a hit flares this second's half of the swarm."
+    },
+    {
+      "name": "tint",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "How much of the palette colors the lamps; 0 is firefly amber."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 0.7,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How much light the song lifts into the swarm."
+    }
+  ]
+}
