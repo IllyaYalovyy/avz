@@ -130,4 +130,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("halo.wgsl"),
         schema: include_str!("halo.json"),
     },
+    Preset {
+        name: "embers",
+        description: "soft flames along the bottom edge, stoked by the kick, shedding embers",
+        source: include_str!("embers.wgsl"),
+        schema: include_str!("embers.json"),
+    },
 ];

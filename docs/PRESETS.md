@@ -629,6 +629,35 @@ presets; the resolution is the only cost
 | `margin` | float | `0.08` | `0..0.3` | How far the anchor point is inset from the frame's edges. |
 | `brightness` | float | `0.7` | `0..1.5` | How much light the loudness of the song puts into the halo. |
 
+## `embers`
+
+> soft flames along the bottom edge, stoked by the kick, shedding embers
+
+A hearth under the picture: a low band of noise flames that lick higher when
+the kick lands, shedding sparse embers that drift up and twinkle with the air
+band. Everything above the band is transparent, and silence banks the fire
+down to coals. Quiet by design — set `height` and `stoke` up for a bonfire.
+
+```bash
+avz render song.mp3 --preset embers --bg art/cover.jpg
+avz render song.mp3 --preset embers --set height=0.35 --set stoke=2 --set sparks=1.2
+```
+
+**Performance:** a few noise octaves inside the fire band and almost nothing
+above it, so frame time is dominated by the resolution — the band itself is
+cheap
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `height` | float | `0.22` | `0.05..0.6` | How high the resting fire band reaches, as a fraction of the frame. |
+| `stoke` | float | `1` | `0..3` | How much higher the kick makes the flames lick. |
+| `billow` | float | `1.6` | `0.4..4` | How tightly the flame noise billows. |
+| `rise` | float | `0.6` | `0.05..2` | How fast the flames climb through the band. |
+| `flicker` | float | `0.6` | `0..2` | How restless the flame tips are. |
+| `sparks` | float | `0.6` | `0..2` | How many embers detach and drift up, twinkling with the air band. |
+| `warmth` | float | `0.75` | `0.2..1` | How far up the palette the hottest flame reaches. |
+| `brightness` | float | `0.75` | `0..1.5` | How much light the loudness of the song puts into the fire. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

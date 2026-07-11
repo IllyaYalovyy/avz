@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`embers`** (#45). A hearth under the picture: soft flames along the
+  bottom, licking higher on the kick, shedding air-twinkled embers; silence
+  banks the fire to coals.
+
 - **`halo`** (#44). First of the subtle presets: a soft glow breathing in a
   chosen corner, rim stirred by noise, swelling gently on hits. An accent for
   backgrounds, not a visual of its own.

@@ -1,0 +1,6 @@
+# Golden frame hashes for the `embers` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 70f42a618d507dd5d4899088d4e5c86dad79ffb1b4751966f97089857c7c0e73
+10 a4a4f8165e904ba0793247cea26cc4041c916e189d81a65df62d29a097f225d4
+100 bb63df94164f89ebee38d18f162c30625b079bcc43ffb18a3339a9935a930a46
