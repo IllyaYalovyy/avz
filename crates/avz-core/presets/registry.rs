@@ -178,4 +178,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("ripples.wgsl"),
         schema: include_str!("ripples.json"),
     },
+    Preset {
+        name: "heartline",
+        description: "a quiet line low in the frame, carrying an EKG blip for every hit",
+        source: include_str!("heartline.wgsl"),
+        schema: include_str!("heartline.json"),
+    },
 ];

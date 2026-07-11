@@ -1,0 +1,102 @@
+{
+  "needs_onsets": true,
+  "perf_hint": "each pixel replays the blips still on screen \u2014 a handful at most \u2014 so frame time is dominated by the resolution",
+  "params": [
+    {
+      "name": "line",
+      "type": "float",
+      "default": 0.18,
+      "min": 0.05,
+      "max": 0.9,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "How high the trace sits above the bottom of the frame."
+    },
+    {
+      "name": "travel",
+      "type": "float",
+      "default": 0.25,
+      "min": 0.05,
+      "max": 1.0,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How fast a blip crosses the frame, in frame widths per second."
+    },
+    {
+      "name": "fade",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.1,
+      "max": 4.0,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How quickly a blip shrinks as it travels."
+    },
+    {
+      "name": "spike",
+      "type": "float",
+      "default": 0.08,
+      "min": 0.01,
+      "max": 0.3,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How tall a fresh blip is, as a fraction of the frame."
+    },
+    {
+      "name": "thickness",
+      "type": "float",
+      "default": 0.004,
+      "min": 0.001,
+      "max": 0.02,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How thick the trace's hot core is, as a fraction of the frame."
+    },
+    {
+      "name": "tremor",
+      "type": "float",
+      "default": 0.2,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How much spectral flux shivers the baseline between blips."
+    },
+    {
+      "name": "tint",
+      "type": "float",
+      "default": 0.65,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "Where on the palette the trace's light sits."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 0.7,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How much light the loudness of the song puts into the trace."
+    }
+  ]
+}
