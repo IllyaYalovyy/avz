@@ -799,6 +799,36 @@ cheapest presets; the resolution is the only cost
 | `lift` | float | `0.25` | `0..2` | How much a hit lifts the lamp, gently. |
 | `brightness` | float | `0.6` | `0..1.5` | How much light the loudness of the song puts into the shaft. |
 
+## `grain`
+
+> film grain and a slow light leak: a texture that makes stills feel like footage
+
+A texture overlay, not a picture: faint grain re-rolled on a cine cadence,
+shimmered by the air band, and one warm light leak wandering the frame,
+breathing with the loudness. Put it over album art and the still starts to
+feel like footage. The grain re-rolls on a frame-quantized clock, so every
+re-render sputters identically.
+
+```bash
+avz render song.mp3 --preset grain --bg art/cover.jpg
+avz render song.mp3 --preset grain --set grain=0.12 --set leak=0.8 --set cadence=12
+```
+
+**Performance:** one hash and one blob per pixel — the cheapest overlay avz
+ships; note that heavy grain fights the encoder, so raise `--quality` (lower
+CRF) if the grain smears
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `grain` | float | `0.06` | `0..0.25` | How strong the film grain is. |
+| `cadence` | int | `24` | `6..60` | How many times per second the grain re-rolls; 24 is cine. |
+| `shimmer` | float | `0.4` | `0..2` | How much the air band roughens the grain. |
+| `leak` | float | `0.4` | `0..1.5` | How strong the wandering light leak is; 0 is grain alone. |
+| `leak_size` | float | `0.5` | `0.1..1.2` | How wide the leak blooms, as a fraction of the short edge. |
+| `drift` | float | `0.05` | `0.005..0.3` | How fast the leak wanders its closed path. |
+| `warmth` | float | `0.6` | `0..1` | Where on the palette the leak's light sits. |
+| `brightness` | float | `0.6` | `0..1.5` | How much the loudness of the song lifts the whole overlay. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

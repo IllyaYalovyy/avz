@@ -166,4 +166,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("beam.wgsl"),
         schema: include_str!("beam.json"),
     },
+    Preset {
+        name: "grain",
+        description: "film grain and a slow light leak: a texture that makes stills feel like footage",
+        source: include_str!("grain.wgsl"),
+        schema: include_str!("grain.json"),
+    },
 ];
