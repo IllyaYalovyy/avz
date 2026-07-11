@@ -1,0 +1,6 @@
+# Golden frame hashes for the `horizon` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 4c40470f8e3c83f65a6987f001916937c27b5edee45fc3f17ba9a819aa889d95
+10 b8926b015d7a6389754b2b9d4542e102f469c2d0a537335138ed62ccf0bc6a2f
+100 7b1ed0f04e3841c50ee53c11066086ab520a22efea6f903166e9f3efdb98eb4e
