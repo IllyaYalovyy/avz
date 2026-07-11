@@ -390,6 +390,35 @@ scales with pixel count alone — on software rendering preview with
 | `vignette` | float | `0.35` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the scene. |
 
+## `aurora`
+
+> curtains of aurora light swaying with the bass, shimmered by the air band
+
+Layered curtains hanging across the upper frame, light draping down from each
+noise-drawn rim. The bass deepens their sway, the air band shimmers the folds,
+the centroid walks the hue, and every hit breathes light into the sky. Where
+`nebula` churns, `aurora` hangs — built for slow, cold material.
+
+```bash
+avz render song.mp3 --preset aurora --palette glacier
+avz render song.mp3 --preset aurora --set curtains=4 --set drape=0.9 --set sway=2
+```
+
+**Performance:** a few octaves of value noise per curtain and no textures —
+frame time scales with pixel count and `curtains`; on software rendering
+preview with `--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `curtains` | int | `3` | `1..4` | How many curtains hang across the sky. |
+| `scale` | float | `1.6` | `0.4..6` | How tightly the curtains meander. |
+| `drift` | float | `0.25` | `0..2` | How fast the curtains travel when nothing is playing. |
+| `sway` | float | `1` | `0..3` | How much deeper the bass swings the curtains. |
+| `shimmer` | float | `1` | `0..2` | How hard the air band flickers the curtains' folds. |
+| `drape` | float | `0.5` | `0.05..1.5` | How far the light hangs down from each curtain's rim. |
+| `vignette` | float | `0.35` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the sky. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

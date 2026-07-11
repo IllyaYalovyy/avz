@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`aurora`** (#37). Curtains of light hanging across the upper frame: the
+  bass deepens their sway, the air band shimmers the folds, hits breathe
+  light into the sky. Where `nebula` churns, `aurora` hangs.
+
 - **`horizon`** (#36). A synthwave sunset: scanlined sun, perspective floor
   grid scrolling toward the viewer, air-twinkled stars; the kick pulses the
   grid, hits flare the horizon line. The backlog's terrain flyover, as neon.
