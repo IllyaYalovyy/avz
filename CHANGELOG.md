@@ -12,6 +12,11 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`starfield`** (#35). A warp-speed starfield in two parallax layers:
+  loudness stretches the stars into warp lines, hits stretch them further, the
+  air band twinkles whatever is barely moving, and silence collapses the sky
+  to still points.
+
 - **`tunnel`** (#34). An endless ring tunnel flown at the speed of the song:
   the kick swells the walls, the mids stripe them, every hit lights the gates,
   and `fog` sinks the vanishing point. From the VISION §12 backlog.

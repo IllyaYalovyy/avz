@@ -330,6 +330,36 @@ scales with pixel count alone — on software rendering preview with
 | `fog` | float | `0.55` | `0..1` | How deep the far end of the bore sinks into darkness. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the bore. |
 
+## `starfield`
+
+> a warp-speed starfield: loudness is velocity, and every hit streaks the sky
+
+Two parallax layers of stars radiating from the center. The flight is steady;
+the music is in the streaks — loudness stretches the stars into warp lines, a
+hit stretches and brightens them further, and the air band twinkles whatever
+is barely moving. Silence collapses the sky back to still, faint points.
+
+```bash
+avz render song.mp3 --preset starfield
+avz render song.mp3 --preset starfield --set warp=2 --set tint=0.7 --set density=1.8
+```
+
+**Performance:** two lattice layers over the uniform and no textures, so frame
+time scales with pixel count alone — on software rendering preview with
+`--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `density` | float | `1` | `0.2..3` | How crowded the sky is. |
+| `speed` | float | `0.6` | `0..3` | How fast the field flies past when nothing is playing. |
+| `warp` | float | `1` | `0..3` | How far the loudness of the song stretches the stars into warp lines. |
+| `streak` | float | `0.35` | `0.05..1` | The base streak length the warp multiplies. |
+| `twinkle` | float | `1` | `0..2` | How hard the air band flickers the stars that are barely moving. |
+| `flash` | float | `1` | `0..3` | How far a hit stretches and brightens every streak. |
+| `tint` | float | `0.35` | `0..1` | How much of the palette colors the starlight; 0 is plain white stars. |
+| `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the sky. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

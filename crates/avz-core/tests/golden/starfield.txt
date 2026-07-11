@@ -1,0 +1,6 @@
+# Golden frame hashes for the `starfield` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 65d7068f3a2e5ff113c0f652cf3e32bd43bdbe2a9bcf199b78d7dccae77746a7
+10 c4a066a4be2b2c2dd5bfbcab6383aa20f5fbaec4781a73e2bff5e61d6255d1d2
+100 04804dc9f909e52cc7074281ab00f759a5f061110711e999ddbc9f64424912ec

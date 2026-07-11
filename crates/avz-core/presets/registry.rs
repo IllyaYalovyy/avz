@@ -70,4 +70,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("tunnel.wgsl"),
         schema: include_str!("tunnel.json"),
     },
+    Preset {
+        name: "starfield",
+        description: "a warp-speed starfield: loudness is velocity, and every hit streaks the sky",
+        source: include_str!("starfield.wgsl"),
+        schema: include_str!("starfield.json"),
+    },
 ];

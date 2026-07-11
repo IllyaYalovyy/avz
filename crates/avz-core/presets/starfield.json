@@ -1,0 +1,86 @@
+{
+  "perf_hint": "two lattice layers over the uniform and no textures, so frame time scales with pixel count alone — on software rendering preview with `--sample 10s` before committing to 1080p",
+  "params": [
+    {
+      "name": "density",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.2,
+      "max": 3.0,
+      "slot": [0, 0],
+      "description": "How crowded the sky is."
+    },
+    {
+      "name": "speed",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [0, 1],
+      "description": "How fast the field flies past when nothing is playing."
+    },
+    {
+      "name": "warp",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [0, 2],
+      "description": "How far the loudness of the song stretches the stars into warp lines."
+    },
+    {
+      "name": "streak",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.05,
+      "max": 1.0,
+      "slot": [0, 3],
+      "description": "The base streak length the warp multiplies."
+    },
+    {
+      "name": "twinkle",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [1, 0],
+      "description": "How hard the air band flickers the stars that are barely moving."
+    },
+    {
+      "name": "flash",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [1, 1],
+      "description": "How far a hit stretches and brightens every streak."
+    },
+    {
+      "name": "tint",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [1, 2],
+      "description": "How much of the palette colors the starlight; 0 is plain white stars."
+    },
+    {
+      "name": "vignette",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [1, 3],
+      "description": "How far the corners of the frame fall off."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [2, 0],
+      "description": "How much light the loudness of the song puts into the sky."
+    }
+  ]
+}
