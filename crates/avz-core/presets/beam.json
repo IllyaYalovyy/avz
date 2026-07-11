@@ -1,0 +1,103 @@
+{
+  "perf_hint": "one wedge and one lattice read per pixel \u2014 among the cheapest presets; the resolution is the only cost",
+  "params": [
+    {
+      "name": "side",
+      "type": "enum",
+      "default": "left",
+      "variants": [
+        "left",
+        "right"
+      ],
+      "slot": [
+        0,
+        0
+      ],
+      "description": "Which top corner the light enters from."
+    },
+    {
+      "name": "tilt",
+      "type": "float",
+      "default": 0.5,
+      "min": 0.1,
+      "max": 1.0,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How steeply the shaft falls: 0.1 hugs the top edge, 1.0 drops straight down."
+    },
+    {
+      "name": "width",
+      "type": "float",
+      "default": 0.12,
+      "min": 0.02,
+      "max": 0.4,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How wide the shaft is at its waist, as a fraction of the short edge."
+    },
+    {
+      "name": "reach",
+      "type": "float",
+      "default": 1.2,
+      "min": 0.3,
+      "max": 3.0,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How far the light carries before it dies."
+    },
+    {
+      "name": "sway",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How much the shaft sways, almost imperceptibly, as if hung."
+    },
+    {
+      "name": "dust",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How much dust drifts visibly inside the light."
+    },
+    {
+      "name": "lift",
+      "type": "float",
+      "default": 0.25,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "How much a hit lifts the lamp, gently."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How much light the loudness of the song puts into the shaft."
+    }
+  ]
+}

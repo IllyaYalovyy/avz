@@ -160,4 +160,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("mist.wgsl"),
         schema: include_str!("mist.json"),
     },
+    Preset {
+        name: "beam",
+        description: "one dusty light shaft from a top corner, swaying as if hung",
+        source: include_str!("beam.wgsl"),
+        schema: include_str!("beam.json"),
+    },
 ];
