@@ -1,0 +1,6 @@
+# Golden frame hashes for the `grain` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 cdc690a50f612def97896c8b016d02d80bffa143c21e86914357a82a82ac3f83
+10 8457be45b751c76ac42eddf184faecf802e727bd4e492d53acdf8a4b3a31e0b8
+100 d9a0927c784d4deeae482b0e7ceea0d9aa5871380b8e91f7f45c5968b52e04f4

@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`grain`** (#51). Film grain on a cine cadence and one warm wandering
+  light leak — a texture overlay that makes a still background feel like
+  footage.
+
 - **`beam`** (#50). A projector shaft from a top corner, dust adrift in the
   light, swaying as if hung; the mids are the lamp and hits lift it gently.
 

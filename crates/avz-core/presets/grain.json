@@ -1,0 +1,101 @@
+{
+  "perf_hint": "one hash and one blob per pixel \u2014 the cheapest overlay avz ships; note that heavy grain fights the encoder, so raise `--quality` (lower CRF) if the grain smears",
+  "params": [
+    {
+      "name": "grain",
+      "type": "float",
+      "default": 0.06,
+      "min": 0.0,
+      "max": 0.25,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "How strong the film grain is."
+    },
+    {
+      "name": "cadence",
+      "type": "int",
+      "default": 24,
+      "min": 6,
+      "max": 60,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How many times per second the grain re-rolls; 24 is cine."
+    },
+    {
+      "name": "shimmer",
+      "type": "float",
+      "default": 0.4,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How much the air band roughens the grain."
+    },
+    {
+      "name": "leak",
+      "type": "float",
+      "default": 0.4,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How strong the wandering light leak is; 0 is grain alone."
+    },
+    {
+      "name": "leak_size",
+      "type": "float",
+      "default": 0.5,
+      "min": 0.1,
+      "max": 1.2,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How wide the leak blooms, as a fraction of the short edge."
+    },
+    {
+      "name": "drift",
+      "type": "float",
+      "default": 0.05,
+      "min": 0.005,
+      "max": 0.3,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How fast the leak wanders its closed path."
+    },
+    {
+      "name": "warmth",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "Where on the palette the leak's light sits."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How much the loudness of the song lifts the whole overlay."
+    }
+  ]
+}
