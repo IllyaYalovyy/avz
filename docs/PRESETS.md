@@ -715,6 +715,34 @@ under 20 at 1080p
 | `tint` | float | `0.35` | `0..1` | How much of the palette colors the lamps; 0 is firefly amber. |
 | `brightness` | float | `0.7` | `0..1.5` | How much light the song lifts into the swarm. |
 
+## `veil`
+
+> an inverse vignette: the frame's edges breathe light with the song
+
+Soft light reaching in from the chosen edges — a picture frame of glow around
+whatever is behind it — its reach breathing with the loudness, textured by
+faint gauze noise, lifted gently by hits. The middle of the frame stays
+transparent. The subtlest way to make a static background feel the music.
+
+```bash
+avz render song.mp3 --preset veil --bg art/cover.jpg
+avz render song.mp3 --preset veil --set sides=bottom --set reach=0.3 --set breathe=1.5
+```
+
+**Performance:** four edge terms and one noise read per pixel — among the
+cheapest presets; the resolution is the only cost
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `sides` | enum | `all` | `all` \| `top` \| `bottom` \| `horizontal` \| `vertical` | Which edges the veil hangs from; `horizontal` is left and right, `vertical` top and bottom. |
+| `reach` | float | `0.18` | `0.03..0.5` | How far the resting veil reaches into the frame. |
+| `breathe` | float | `0.8` | `0..2` | How much the loudness deepens the veil's reach. |
+| `softness` | float | `0.5` | `0..1` | How long the veil's feather is; 0 is a crisp border of light. |
+| `texture` | float | `0.3` | `0..1` | How much gauze grain the veil carries; 0 is a clean gradient. |
+| `lift` | float | `0.3` | `0..2` | How much a hit lifts the veil, gently. |
+| `hue` | float | `0.3` | `0..1` | Where on the palette the veil's light sits. |
+| `brightness` | float | `0.5` | `0..1.5` | How much light the loudness of the song puts into the veil. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
