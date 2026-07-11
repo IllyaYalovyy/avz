@@ -1,0 +1,6 @@
+# Golden frame hashes for the `veil` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 f0fcb63001d62986ab42de0bb61b78fdc89f2fa9e5d2ab2ff53c52e9d38d5297
+10 f8c3b76197153f8d9bf68ea319a26cff381cb0d52691432ace14b22a8aedd1fa
+100 1ee33ece060d2c74e6072e4324a04fd93532d6a0f88d1d08a3b5f306ead4071d

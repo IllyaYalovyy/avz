@@ -148,4 +148,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("fireflies.wgsl"),
         schema: include_str!("fireflies.json"),
     },
+    Preset {
+        name: "veil",
+        description: "an inverse vignette: the frame's edges breathe light with the song",
+        source: include_str!("veil.wgsl"),
+        schema: include_str!("veil.json"),
+    },
 ];
