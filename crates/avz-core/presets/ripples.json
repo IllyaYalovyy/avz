@@ -1,0 +1,90 @@
+{
+  "needs_onsets": true,
+  "perf_hint": "each pixel replays the hits still rippling (about `4.6 / calm` seconds of them), so busy songs at low `calm` cost the most \u2014 on software rendering preview with `--sample 10s` before committing to 1080p",
+  "params": [
+    {
+      "name": "speed",
+      "type": "float",
+      "default": 0.22,
+      "min": 0.05,
+      "max": 1.0,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "How fast a ring expands, in frame widths per second."
+    },
+    {
+      "name": "calm",
+      "type": "float",
+      "default": 0.9,
+      "min": 0.2,
+      "max": 4.0,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How quickly the water forgets a hit; higher stills it sooner."
+    },
+    {
+      "name": "width",
+      "type": "float",
+      "default": 0.02,
+      "min": 0.005,
+      "max": 0.1,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How wide a young ring is, as a fraction of the short edge."
+    },
+    {
+      "name": "spread",
+      "type": "float",
+      "default": 0.5,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How much a ring widens and softens as it travels."
+    },
+    {
+      "name": "scatter",
+      "type": "float",
+      "default": 0.55,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How widely the strikes land; 0 drops every hit in the center."
+    },
+    {
+      "name": "tint",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How much each strike leans the water's palette tone."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 1.5,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "How much light the loudness of the song puts into the water."
+    }
+  ]
+}
