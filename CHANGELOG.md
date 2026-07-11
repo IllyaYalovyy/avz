@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`rain`** (#39). Spectral rain: columns are bands, a loud band rains long
+  bright streaks and a quiet one stays dry. Drops fall at constant seeded
+  speeds — the music scales their light, never their position.
+
 - **`scope`** (#38). An oscilloscope beam tracing a lissajous knot: the kick
   and mids stretch its axes, the highs ripple a harmonic along it, hits
   brighten the phosphor. The backlog's lissajous, drawn with segment

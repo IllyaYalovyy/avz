@@ -450,6 +450,35 @@ below and preview with `--sample 10s` before committing to 1080p
 | `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the beam. |
 
+## `rain`
+
+> spectral rain: each column falls at the loudness of its own band
+
+Falling streaks in columns, and the horizontal axis is the spectrum's
+frequency axis — each column is rained on by its own band, so a bass drop
+pours down the left of the frame while a silent band stays dry. Drops fall at
+constant seeded speeds; the music scales their light, never their position.
+
+```bash
+avz render song.mp3 --preset rain --palette verdant
+avz render song.mp3 --preset rain --set columns=72 --set streak=0.5 --set fall=1.4
+```
+
+**Performance:** up to `layers` drops per pixel over two spectrum taps, so
+frame time scales with pixel count and `layers` — on software rendering
+preview with `--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `columns` | int | `48` | `8..96` | How many columns of rain divide the spectrum, bass at the left. |
+| `fall` | float | `0.9` | `0.1..3` | How fast the rain falls, in frames per second of travel. |
+| `streak` | float | `0.28` | `0.05..1` | How long a drop's trail hangs above its head. |
+| `layers` | int | `3` | `1..4` | How many drops share each column at different speeds. |
+| `glow` | float | `1` | `0..3` | How hot each drop's head burns. |
+| `flash` | float | `0.6` | `0..3` | How much a hit lights the whole sky of rain. |
+| `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the rain. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
