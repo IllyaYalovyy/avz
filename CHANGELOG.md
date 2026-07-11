@@ -12,6 +12,14 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **The reference docs** (#33). `docs/PRESETS.md` documents every preset and
+  every parameter — description, example commands, the full table of types,
+  defaults, ranges, and performance notes — and `docs/CONFIGURATION.md`
+  documents every config section and key with the precedence rules and worked
+  examples. Neither can rot: `docs_reference.rs` checks both against the
+  embedded registry, schemas, and `config --example` generator, so an
+  undocumented preset, parameter, or key fails the suite.
+
 - **`meter`, the second panel preset** (#32). A VU-style level meter: the
   enveloped loudness fills an anchored ladder of LED `segments` (or a
   continuous bar at `segments = 0`), standing or lying down by `orientation`,

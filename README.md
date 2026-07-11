@@ -20,17 +20,21 @@ request that does not serve it goes to the backlog.
 **Status:** v0.1. The whole pipeline runs: decode, full FFT analysis with
 envelopes and onsets, a preset on the GPU, a background image or looped video and
 a title card composited over it, ffmpeg encode with the original audio muxed
-untouched. Six presets ship — `pulse`, `nebula`, `ribbons`, `particles`,
-`kaleido`, and `ink` — selected with `--preset`, and `--codec x264|x265|av1`
-picks the encoder. See [CHANGELOG.md](CHANGELOG.md) for what landed and what is
-deliberately absent.
+untouched. Eight presets ship — `pulse`, `nebula`, `ribbons`, `particles`,
+`kaleido`, and `ink` fill the frame; `bars` and `meter` are *panel* presets
+that live in one anchored spot and leave the rest to the background — selected
+with `--preset`, and `--codec x264|x265|av1` picks the encoder. See
+[CHANGELOG.md](CHANGELOG.md) for what landed and what is deliberately absent.
 
 **Presets.** `avz presets` lists them; `avz presets <name>` prints the
-parameters, their defaults and ranges, and any note about software rendering:
+parameters, their defaults and ranges, and any note about software rendering.
+[docs/PRESETS.md](docs/PRESETS.md) documents every preset and every parameter,
+with examples:
 
 ```bash
 avz render song.mp3 --preset nebula
 avz render song.mp3 --preset nebula --set nebula.trail_decay=0.94
+avz render song.mp3 --preset bars --bg art/cover.jpg   # analyzer panel over the art
 ```
 
 **Palettes.** `--palette` takes a built-in name — `ember`, `glacier`, `verdant`,
@@ -191,7 +195,8 @@ for f in album/*.mp3; do avz render "$f" --config album.toml; done
 Configuration precedence: CLI flags > `--set` overrides > `--config` file >
 preset defaults > built-in defaults. `--sample` contributes one default of its
 own — a reduced 720p resolution — which ranks just above preset defaults, so a
-config file or a flag still wins.
+config file or a flag still wins. Every section and key is documented with
+examples in [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
 
 Each render writes to `<song-stem>.mp4` beside its input and exits 0, so the
 batch loop above needs nothing from avz but its exit code: 2 means the arguments
@@ -238,6 +243,8 @@ task-runner files, prompts, context files, and chat logs from being committed:
 │   ├── RFC-001-mvp-v0.1.md      # The v0.1 development plan
 │   └── USER-TASKS.md            # User workflow inventory
 ├── docs/
+│   ├── PRESETS.md               # Every preset and parameter, with examples
+│   ├── CONFIGURATION.md         # Every config key and the precedence rules
 │   ├── PROCESS.md               # How work moves from idea to merge
 │   ├── COMMITS.md               # Commit identity, staging, and message rules
 │   ├── DESIGN-REVIEW.md         # RFC/design review rules
