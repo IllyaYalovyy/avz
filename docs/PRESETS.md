@@ -743,6 +743,34 @@ cheapest presets; the resolution is the only cost
 | `hue` | float | `0.3` | `0..1` | Where on the palette the veil's light sits. |
 | `brightness` | float | `0.5` | `0..1.5` | How much light the loudness of the song puts into the veil. |
 
+## `mist`
+
+> low fog drifting along the bottom, thickened by the low mids
+
+Layered ground fog drifting on the wind, feathering to nothing at its
+ceiling. The low mids are the fog machine — a warm arrangement fills the
+ground, a thin one leaves wisps — and the bass leans the bank gently. No hits,
+no sparkle: weather. Pairs beautifully with `--bg` night photography.
+
+```bash
+avz render song.mp3 --preset mist --bg art/forest.png
+avz render song.mp3 --preset mist --set height=0.45 --set wind=0.25 --set pale=0.8
+```
+
+**Performance:** a few noise octaves inside the fog bank and an early exit
+above it, so frame time is dominated by the resolution
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `height` | float | `0.28` | `0.08..0.7` | How high the resting fog bank stands, as a fraction of the frame. |
+| `wind` | float | `0.1` | `0..0.6` | How fast the fog drifts sideways. |
+| `billow` | float | `1.2` | `0.4..4` | How tightly the fog billows. |
+| `thicken` | float | `0.8` | `0..1` | How much the low mids thicken the fog. |
+| `layers` | int | `2` | `1..3` | How many depths of fog drift past each other. |
+| `pale` | float | `0.5` | `0..1` | How white the fog is; 0 keeps it in the palette's low end. |
+| `sway` | float | `0.3` | `0..2` | How much the bass leans the fog bank's ceiling. |
+| `brightness` | float | `0.55` | `0..1.5` | How much light the loudness of the song puts into the fog. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

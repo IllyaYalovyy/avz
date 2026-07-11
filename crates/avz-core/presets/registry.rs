@@ -154,4 +154,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("veil.wgsl"),
         schema: include_str!("veil.json"),
     },
+    Preset {
+        name: "mist",
+        description: "low fog drifting along the bottom, thickened by the low mids",
+        source: include_str!("mist.wgsl"),
+        schema: include_str!("mist.json"),
+    },
 ];
