@@ -479,6 +479,36 @@ preview with `--sample 10s` before committing to 1080p
 | `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the rain. |
 
+## `tiles`
+
+> an equalizer wall of tiles: the spectrum lit floor to ceiling across the frame
+
+A chunky LED wall filling the whole frame — the wall-sized cousin of the
+`bars` panel. Columns are bands, rows light from the floor to each column's
+level, the topmost lit tile burns hotter, unlit tiles keep a faint ghost so
+the wall reads as a wall, and every hit brightens the lit faces. Big, legible,
+made for lyric-video energy.
+
+```bash
+avz render song.mp3 --preset tiles
+avz render song.mp3 --preset tiles --set columns=24 --set rows=14 --set ghost=0.12
+```
+
+**Performance:** four spectrum taps per pixel and no other reads, so frame
+time scales with pixel count alone — on software rendering preview with
+`--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `columns` | int | `16` | `6..48` | How many tile columns divide the spectrum, bass at the left. |
+| `rows` | int | `9` | `4..24` | How many tile rows climb from the floor to the ceiling. |
+| `bevel` | float | `0.12` | `0.02..0.4` | How wide the dark grout between tiles is. |
+| `ghost` | float | `0.06` | `0..1` | How visible the unlit tiles stay, so the wall reads as a wall. |
+| `peak` | float | `1` | `0..2` | How much hotter the topmost lit tile in each column burns. |
+| `flash` | float | `0.8` | `0..3` | How much a hit brightens every lit face. |
+| `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the wall. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

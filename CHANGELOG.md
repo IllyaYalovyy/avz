@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`tiles`** (#40). An equalizer wall filling the frame: columns are bands,
+  rows light to each column's level, the top tile burns hotter, hits brighten
+  the wall. No clock at all — a pure function of the frame's spectrum.
+
 - **`rain`** (#39). Spectral rain: columns are bands, a loud band rains long
   bright streaks and a quiet one stays dry. Drops fall at constant seeded
   speeds — the music scales their light, never their position.
