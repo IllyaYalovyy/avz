@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`strings`** (#43). Harp strings with seeded pitches: every hit plucks a
+  seeded subset, plucks superpose and ring down as closed forms of their age —
+  the particles rule on one dimension. A fill reads as a strum.
+
 - **`stained`** (#42). A voronoi stained-glass window: each pane glows with
   its dealt band, and the newest hit's ordinal — read from the onset history —
   re-leads the whole mosaic, so every hit is a new window.

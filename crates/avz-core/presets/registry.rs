@@ -118,4 +118,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("stained.wgsl"),
         schema: include_str!("stained.json"),
     },
+    Preset {
+        name: "strings",
+        description: "harp strings across the frame, plucked by the hits and left to ring down",
+        source: include_str!("strings.wgsl"),
+        schema: include_str!("strings.json"),
+    },
 ];
