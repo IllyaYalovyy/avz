@@ -1,0 +1,6 @@
+# Golden frame hashes for the `orbits` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 aa3cef51fe1a1f25cf359e52552dca5853a7c2f02312c5a5c3a4067ad3b2e64b
+10 476bb1954d44803cd99235a043036f636997ceb14f85c40b36bbe72d0a17da0f
+100 19494435636cfb4c1922ead9b8ca001cccfc066072ac47355d8ca1d13f00e859

@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`orbits`** (#41). Five band-planets circling a sun of the song's
+  loudness, comet tails curling behind them through the feedback texture;
+  every hit flashes the system.
+
 - **`tiles`** (#40). An equalizer wall filling the frame: columns are bands,
   rows light to each column's level, the top tile burns hotter, hits brighten
   the wall. No clock at all — a pure function of the frame's spectrum.
