@@ -112,4 +112,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("orbits.wgsl"),
         schema: include_str!("orbits.json"),
     },
+    Preset {
+        name: "stained",
+        description: "stained glass lit from behind by the bands, re-leaded on every hit",
+        source: include_str!("stained.wgsl"),
+        schema: include_str!("stained.json"),
+    },
 ];

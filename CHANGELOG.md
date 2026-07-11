@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`stained`** (#42). A voronoi stained-glass window: each pane glows with
+  its dealt band, and the newest hit's ordinal — read from the onset history —
+  re-leads the whole mosaic, so every hit is a new window.
+
 - **`orbits`** (#41). Five band-planets circling a sun of the song's
   loudness, comet tails curling behind them through the feedback texture;
   every hit flashes the system.

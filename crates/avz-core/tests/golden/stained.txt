@@ -1,0 +1,6 @@
+# Golden frame hashes for the `stained` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 73e4179360ed426f96a85fe0a29c23c7287d7963c25453cdc8af6e021034349a
+10 9d1eb230d64a6515b8ca16f57951e038783cb517562b9466a354d13348df07cf
+100 32aa88976bf283c663ee622cac668a30196e52393d3e9c95d93bbcd1ea67a5c2

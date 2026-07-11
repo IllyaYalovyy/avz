@@ -539,6 +539,36 @@ to 1080p
 | `flash` | float | `1` | `0..3` | How brightly a hit flashes every body at once. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the system. |
 
+## `stained`
+
+> stained glass lit from behind by the bands, re-leaded on every hit
+
+A voronoi window of glass panes behind dark lead seams. Each pane is dealt one
+of the five bands and glows as that band speaks — a verse lights one
+constellation of panes, the chorus another — and every hit re-leads the whole
+window into a new mosaic, flaring as it settles. Set `reshatter=false` to keep
+one window for the whole song.
+
+```bash
+avz render song.mp3 --preset stained --palette carpathian
+avz render song.mp3 --preset stained --set cells=9 --set lead=0.1 --set reshatter=false
+```
+
+**Performance:** a 3x3 voronoi search per pixel and one onset read, so frame
+time scales with pixel count alone — on software rendering preview with
+`--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `cells` | float | `5` | `2..14` | How many panes span the short edge of the window. |
+| `jitter` | float | `0.9` | `0..1` | How irregular the panes are; 0 is a square grid. |
+| `lead` | float | `0.06` | `0.01..0.2` | How wide the dark lead seams between panes are. |
+| `reshatter` | bool | `true` | `true` \| `false` | Whether every hit re-leads the window into a new mosaic. |
+| `glow` | float | `1` | `0..2` | How brightly a pane glows when its band speaks. |
+| `flash` | float | `1` | `0..3` | How hard a hit flares the freshly re-leaded glass. |
+| `vignette` | float | `0.35` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts through the window. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
