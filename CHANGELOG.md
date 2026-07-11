@@ -12,6 +12,9 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`beam`** (#50). A projector shaft from a top corner, dust adrift in the
+  light, swaying as if hung; the mids are the lamp and hits lift it gently.
+
 - **`mist`** (#49). Ground fog on the wind: the low mids thicken it, the bass
   leans its ceiling, the top feathers to nothing. Weather, not a visualizer.
 

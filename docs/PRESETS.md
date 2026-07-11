@@ -771,6 +771,34 @@ above it, so frame time is dominated by the resolution
 | `sway` | float | `0.3` | `0..2` | How much the bass leans the fog bank's ceiling. |
 | `brightness` | float | `0.55` | `0..1.5` | How much light the loudness of the song puts into the fog. |
 
+## `beam`
+
+> one dusty light shaft from a top corner, swaying as if hung
+
+A projector shaft entering from the top-left or top-right, widening and dying
+as it crosses the frame, dust adrift inside the light. The mids are the lamp,
+hits lift it gently, silence turns the projector off. Everything outside the
+shaft is transparent.
+
+```bash
+avz render song.mp3 --preset beam --bg art/cover.jpg
+avz render song.mp3 --preset beam --set side=right --set tilt=0.7 --set dust=1.2
+```
+
+**Performance:** one wedge and one lattice read per pixel — among the
+cheapest presets; the resolution is the only cost
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `side` | enum | `left` | `left` \| `right` | Which top corner the light enters from. |
+| `tilt` | float | `0.5` | `0.1..1` | How steeply the shaft falls: 0.1 hugs the top edge, 1.0 drops straight down. |
+| `width` | float | `0.12` | `0.02..0.4` | How wide the shaft is at its waist, as a fraction of the short edge. |
+| `reach` | float | `1.2` | `0.3..3` | How far the light carries before it dies. |
+| `sway` | float | `0.3` | `0..2` | How much the shaft sways, almost imperceptibly, as if hung. |
+| `dust` | float | `0.6` | `0..2` | How much dust drifts visibly inside the light. |
+| `lift` | float | `0.25` | `0..2` | How much a hit lifts the lamp, gently. |
+| `brightness` | float | `0.6` | `0..1.5` | How much light the loudness of the song puts into the shaft. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
