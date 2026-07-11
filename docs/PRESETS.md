@@ -601,6 +601,34 @@ committing to 1080p
 | `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the course. |
 
+## `halo`
+
+> a soft glow breathing in a chosen corner, an accent over whatever is behind it
+
+The first of the *subtle* presets: one radial glow anchored on the nine-grid,
+breathing with the loudness, its rim stirred by slow noise, swelling gently —
+never flashing — on a hit. The rest of the frame stays transparent: this is an
+accent for a background image or video, not a visual of its own.
+
+```bash
+avz render song.mp3 --preset halo --bg art/cover.jpg
+avz render song.mp3 --preset halo --set anchor=bottom-left --set size=0.5 --set breathe=1.2
+```
+
+**Performance:** one glow and a noise read per pixel — among the cheapest
+presets; the resolution is the only cost
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `anchor` | enum | `top-right` | nine-grid | Which of the nine grid positions the halo breathes in, the text card's vocabulary. |
+| `size` | float | `0.35` | `0.1..0.9` | The halo's resting radius, as a fraction of the frame's short edge. |
+| `breathe` | float | `0.6` | `0..2` | How much the loudness swells the halo. |
+| `softness` | float | `0.6` | `0..1` | How long the halo's feather is; 0 is a lantern edge. |
+| `wobble` | float | `0.3` | `0..1` | How much slow noise stirs the halo's rim. |
+| `swell` | float | `0.4` | `0..2` | How much a hit swells the halo — gently, never a flash. |
+| `margin` | float | `0.08` | `0..0.3` | How far the anchor point is inset from the frame's edges. |
+| `brightness` | float | `0.7` | `0..1.5` | How much light the loudness of the song puts into the halo. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

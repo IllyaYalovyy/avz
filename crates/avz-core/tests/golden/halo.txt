@@ -1,0 +1,6 @@
+# Golden frame hashes for the `halo` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 f3ff7b21468196cf7983358d6e7a92a3d009dcce410f71688657377e10e6728f
+10 b91ccf153889371a18d7877b6d693ffb5002f9263d2e9fdb5039c306bfcbfd7d
+100 15a4e05156a80724acd1289da16b6c64b2553d58597d230c5944a3306682d9cc
