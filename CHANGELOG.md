@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`motes`** (#46). Drifting dust in two depth layers, lifted by the mids,
+  glinted by the air band, indifferent to hits — the quietest preset avz
+  ships.
+
 - **`embers`** (#45). A hearth under the picture: soft flames along the
   bottom, licking higher on the kick, shedding air-twinkled embers; silence
   banks the fire to coals.

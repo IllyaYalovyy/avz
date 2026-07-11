@@ -658,6 +658,34 @@ cheap
 | `warmth` | float | `0.75` | `0.2..1` | How far up the palette the hottest flame reaches. |
 | `brightness` | float | `0.75` | `0..1.5` | How much light the loudness of the song puts into the fire. |
 
+## `motes`
+
+> drifting dust, barely lit: the quietest preset, an atmosphere over a background
+
+Sparse dust in two depth layers, drifting slowly on one heading the way dust
+crosses afternoon light. The mids lift it gently into view, the air band
+glints it, and hits do nothing at all. Made to sit over album art without
+asking for attention.
+
+```bash
+avz render song.mp3 --preset motes --bg art/cover.jpg
+avz render song.mp3 --preset motes --set density=1.6 --set drift=0.12 --set tint=0.7
+```
+
+**Performance:** two lattice layers per pixel and no textures — among the
+cheapest presets; the resolution is the only cost
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `density` | float | `1` | `0.2..2` | How much dust hangs in the air. |
+| `size` | float | `0.012` | `0.003..0.05` | How wide a mote is, as a fraction of the short edge. |
+| `drift` | float | `0.05` | `0..0.4` | How fast the dust crosses the frame. |
+| `heading` | float | `0.12` | `0..1` | Which way the dust drifts, in turns; 0 is rightward. |
+| `twinkle` | float | `0.6` | `0..2` | How much the air band glints the motes. |
+| `tint` | float | `0.3` | `0..1` | How much of the palette colors the dust; 0 is plain daylight. |
+| `glow` | float | `0.5` | `0..2` | How far the faint halo around each mote reaches. |
+| `brightness` | float | `0.6` | `0..1.5` | How much light the song lifts into the dust. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

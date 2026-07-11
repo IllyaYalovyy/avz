@@ -136,4 +136,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("embers.wgsl"),
         schema: include_str!("embers.json"),
     },
+    Preset {
+        name: "motes",
+        description: "drifting dust, barely lit: the quietest preset, an atmosphere over a background",
+        source: include_str!("motes.wgsl"),
+        schema: include_str!("motes.json"),
+    },
 ];

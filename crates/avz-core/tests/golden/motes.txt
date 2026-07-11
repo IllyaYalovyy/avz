@@ -1,0 +1,6 @@
+# Golden frame hashes for the `motes` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 cc32a715a2f265a7892088eb8aac8696ea294d57c41d5ed8dddafeb0e0e3d1a8
+10 5f27f8fed9e491adbb58033cf9ce5554523f34608dcb8f3dd806930f6c926977
+100 38ce2e1da5ab26ed714b6c1408082e2cc49a3a9f065948ddf74d3c76d77357e4
