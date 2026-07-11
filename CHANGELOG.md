@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`halo`** (#44). First of the subtle presets: a soft glow breathing in a
+  chosen corner, rim stirred by noise, swelling gently on hits. An accent for
+  backgrounds, not a visual of its own.
+
 - **`strings`** (#43). Harp strings with seeded pitches: every hit plucks a
   seeded subset, plucks superpose and ring down as closed forms of their age —
   the particles rule on one dimension. A fill reads as a strum.
