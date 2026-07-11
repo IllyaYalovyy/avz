@@ -569,6 +569,38 @@ time scales with pixel count alone — on software rendering preview with
 | `vignette` | float | `0.35` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts through the window. |
 
+## `strings`
+
+> harp strings across the frame, plucked by the hits and left to ring down
+
+A course of vertical strings, each with its own seeded pitch. Every hit plucks
+a seeded subset and they vibrate in their fundamental, ringing down at
+`damping` and superposing when hits overlap — a fill reads as a strum. The
+bass leans the whole course, and a ringing string burns brighter than an idle
+one. Sparse, elegant, best on percussive material.
+
+```bash
+avz render song.mp3 --preset strings
+avz render song.mp3 --preset strings --set strings=20 --set damping=0.8 --set tone=4
+```
+
+**Performance:** each pixel replays the hits still ringing on its one string,
+so frame time scales with hit density over `5 / damping` seconds — heavier
+damping is cheaper; on software rendering preview with `--sample 10s` before
+committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `strings` | int | `12` | `3..32` | How many strings span the frame. |
+| `tone` | float | `2` | `0.5..8` | The course's visual pitch: how fast a plucked string shivers. |
+| `damping` | float | `1.5` | `0.3..6` | How quickly a pluck rings down; higher stills the string sooner. |
+| `amplitude` | float | `0.5` | `0..2` | How far a pluck throws a string, as a fraction of its pitch spacing. |
+| `pluck` | float | `0.45` | `0..1` | The chance each hit plucks any given string. |
+| `thickness` | float | `0.1` | `0.02..0.4` | How wide a string's lit core is, as a fraction of its spacing. |
+| `glow` | float | `0.8` | `0..3` | How far the halo around each string reaches. |
+| `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the course. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
