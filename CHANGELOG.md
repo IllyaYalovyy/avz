@@ -12,6 +12,9 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`mist`** (#49). Ground fog on the wind: the low mids thicken it, the bass
+  leans its ceiling, the top feathers to nothing. Weather, not a visualizer.
+
 - **`veil`** (#48). An inverse vignette: the chosen edges breathe light with
   the loudness through faint gauze noise, hits lifting it gently. The
   subtlest way to make a static background feel the music.

@@ -1,0 +1,6 @@
+# Golden frame hashes for the `mist` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 be8cf719d36e713b1ef8a80d7bf156918ebe1f967b8026072d4d63fe0f33bbe9
+10 ffa8ea1a3ebe8ed2e5b10ab4fba185cd8cc4a9249a1e7817397beb874af380f1
+100 9c76f79a859dacaf94b60da90eed8145a29ec455854c086d159ee82de7e48efe
