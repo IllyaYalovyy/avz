@@ -829,6 +829,34 @@ CRF) if the grain smears
 | `warmth` | float | `0.6` | `0..1` | Where on the palette the leak's light sits. |
 | `brightness` | float | `0.6` | `0..1.5` | How much the loudness of the song lifts the whole overlay. |
 
+## `ripples`
+
+> rain on still water: faint rings spreading from every hit
+
+Every hit drops a ring at a seeded point; rings expand, widen, and calm as
+pure functions of their age, and overlapping hits lay interference the way
+real rain does. Between hits the frame is still water — which is to say, the
+background. The quietest of the hit-driven presets.
+
+```bash
+avz render song.mp3 --preset ripples --bg art/lake.jpg
+avz render song.mp3 --preset ripples --set calm=0.4 --set scatter=0.9 --set speed=0.35
+```
+
+**Performance:** each pixel replays the hits still rippling (about
+`4.6 / calm` seconds of them), so busy songs at low `calm` cost the most — on
+software rendering preview with `--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `speed` | float | `0.22` | `0.05..1` | How fast a ring expands, in frame widths per second. |
+| `calm` | float | `0.9` | `0.2..4` | How quickly the water forgets a hit; higher stills it sooner. |
+| `width` | float | `0.02` | `0.005..0.1` | How wide a young ring is, as a fraction of the short edge. |
+| `spread` | float | `0.5` | `0..2` | How much a ring widens and softens as it travels. |
+| `scatter` | float | `0.55` | `0..1` | How widely the strikes land; 0 drops every hit in the center. |
+| `tint` | float | `0.35` | `0..1` | How much each strike leans the water's palette tone. |
+| `brightness` | float | `0.6` | `0..1.5` | How much light the loudness of the song puts into the water. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:

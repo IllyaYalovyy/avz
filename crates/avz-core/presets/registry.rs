@@ -172,4 +172,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("grain.wgsl"),
         schema: include_str!("grain.json"),
     },
+    Preset {
+        name: "ripples",
+        description: "rain on still water: faint rings spreading from every hit",
+        source: include_str!("ripples.wgsl"),
+        schema: include_str!("ripples.json"),
+    },
 ];

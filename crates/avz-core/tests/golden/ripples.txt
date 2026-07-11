@@ -1,0 +1,6 @@
+# Golden frame hashes for the `ripples` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 785969c12c6e80bd5010a8d57b2b12419da3122370630d80b951cb349850d0d7
+10 c0b990f6ec83821126e7b9a7c0458c8721c1ee294b6ceaa3ca15d01cbc8bd8a0
+100 54e95ca50eea9a9466b2ebd3f4268eed3563bb414acf080c8bb771b45d6ca6a0

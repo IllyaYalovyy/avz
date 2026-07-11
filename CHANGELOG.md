@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`ripples`** (#52). Rain on still water: every hit drops a ring at a
+  seeded point, expanding and calming as a closed form of its age; between
+  hits, only the background.
+
 - **`grain`** (#51). Film grain on a cine cadence and one warm wandering
   light leak — a texture overlay that makes a still background feel like
   footage.
