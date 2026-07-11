@@ -1,0 +1,113 @@
+{
+  "perf_hint": "every pixel measures its distance to `points` beam segments, so frame time scales with `points` \u2014 on software rendering keep it at 48 or below and preview with `--sample 10s` before committing to 1080p",
+  "params": [
+    {
+      "name": "complexity",
+      "type": "int",
+      "default": 3,
+      "min": 1,
+      "max": 8,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "The figure's order: x runs at this frequency and y one higher, the classic closed knot."
+    },
+    {
+      "name": "points",
+      "type": "int",
+      "default": 48,
+      "min": 12,
+      "max": 128,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How many segments trace the beam; more is smoother and costs linearly."
+    },
+    {
+      "name": "thickness",
+      "type": "float",
+      "default": 0.012,
+      "min": 0.002,
+      "max": 0.06,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How wide the beam's hot core is, as a fraction of the short edge."
+    },
+    {
+      "name": "glow",
+      "type": "float",
+      "default": 0.8,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How far the phosphor halo reaches around the beam."
+    },
+    {
+      "name": "spin",
+      "type": "float",
+      "default": 0.12,
+      "min": -1.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How fast the knot tumbles, in turns per second; negative tumbles the other way."
+    },
+    {
+      "name": "wobble",
+      "type": "float",
+      "default": 0.6,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How much fine harmonic ripple the highs run along the beam."
+    },
+    {
+      "name": "flash",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "How much a hit brightens the beam."
+    },
+    {
+      "name": "vignette",
+      "type": "float",
+      "default": 0.3,
+      "min": 0.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How far the corners of the frame fall off."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        2,
+        0
+      ],
+      "description": "How much light the loudness of the song puts into the beam."
+    }
+  ]
+}

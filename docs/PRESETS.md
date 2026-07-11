@@ -419,6 +419,37 @@ preview with `--sample 10s` before committing to 1080p
 | `vignette` | float | `0.35` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the sky. |
 
+## `scope`
+
+> an oscilloscope figure: a lissajous curve the bands bend and the beat brightens
+
+One luminous beam tracing a closed lissajous knot on a dark scope — the
+backlog's oscilloscope. The kick stretches its horizontal axis, the mids its
+vertical, the highs ripple a fine harmonic along the trace, and the knot
+tumbles slowly while every hit brightens the phosphor. Minimal and precise;
+at `complexity=1` it is a slowly breathing circle.
+
+```bash
+avz render song.mp3 --preset scope --palette mono
+avz render song.mp3 --preset scope --set complexity=5 --set spin=0.3 --set glow=1.5
+```
+
+**Performance:** every pixel measures its distance to `points` beam segments,
+so frame time scales with `points` — on software rendering keep it at 48 or
+below and preview with `--sample 10s` before committing to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `complexity` | int | `3` | `1..8` | The figure's order: x runs at this frequency and y one higher, the classic closed knot. |
+| `points` | int | `48` | `12..128` | How many segments trace the beam; more is smoother and costs linearly. |
+| `thickness` | float | `0.012` | `0.002..0.06` | How wide the beam's hot core is, as a fraction of the short edge. |
+| `glow` | float | `0.8` | `0..3` | How far the phosphor halo reaches around the beam. |
+| `spin` | float | `0.12` | `-1..1` | How fast the knot tumbles, in turns per second; negative tumbles the other way. |
+| `wobble` | float | `0.6` | `0..2` | How much fine harmonic ripple the highs run along the beam. |
+| `flash` | float | `1` | `0..3` | How much a hit brightens the beam. |
+| `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the beam. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
