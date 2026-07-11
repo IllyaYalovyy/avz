@@ -106,4 +106,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("tiles.wgsl"),
         schema: include_str!("tiles.json"),
     },
+    Preset {
+        name: "orbits",
+        description: "band planets on trails: five bodies orbiting, each swollen by its own band",
+        source: include_str!("orbits.wgsl"),
+        schema: include_str!("orbits.json"),
+    },
 ];

@@ -1,0 +1,102 @@
+{
+  "needs_feedback": true,
+  "perf_hint": "one history sample and five bodies per pixel \u2014 comparable to `nebula`; on software rendering preview with `--sample 10s` before committing to 1080p",
+  "params": [
+    {
+      "name": "scale",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.4,
+      "max": 2.0,
+      "slot": [
+        0,
+        0
+      ],
+      "description": "How wide the whole orbital system spreads."
+    },
+    {
+      "name": "speed",
+      "type": "float",
+      "default": 0.35,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        0,
+        1
+      ],
+      "description": "How fast the innermost body circles, in revolutions per second."
+    },
+    {
+      "name": "swell",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [
+        0,
+        2
+      ],
+      "description": "How far a band's loudness pushes its body outward."
+    },
+    {
+      "name": "body_size",
+      "type": "float",
+      "default": 0.035,
+      "min": 0.01,
+      "max": 0.12,
+      "slot": [
+        0,
+        3
+      ],
+      "description": "How wide a body's lit core is, as a fraction of the short edge."
+    },
+    {
+      "name": "trail",
+      "type": "float",
+      "default": 0.9,
+      "min": 0.0,
+      "max": 0.97,
+      "slot": [
+        1,
+        0
+      ],
+      "description": "How much of the previous frame survives: the length of the comet tails."
+    },
+    {
+      "name": "curl",
+      "type": "float",
+      "default": 0.15,
+      "min": -1.0,
+      "max": 1.0,
+      "slot": [
+        1,
+        1
+      ],
+      "description": "How hard the tails bend with the orbits; negative bends them against."
+    },
+    {
+      "name": "flash",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 3.0,
+      "slot": [
+        1,
+        2
+      ],
+      "description": "How brightly a hit flashes every body at once."
+    },
+    {
+      "name": "brightness",
+      "type": "float",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 2.0,
+      "slot": [
+        1,
+        3
+      ],
+      "description": "How much light the loudness of the song puts into the system."
+    }
+  ]
+}

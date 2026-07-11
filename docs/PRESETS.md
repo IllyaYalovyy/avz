@@ -509,6 +509,36 @@ time scales with pixel count alone — on software rendering preview with
 | `vignette` | float | `0.3` | `0..1` | How far the corners of the frame fall off. |
 | `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the wall. |
 
+## `orbits`
+
+> band planets on trails: five bodies orbiting, each swollen by its own band
+
+A small solar system: five bodies circle a sun of the song's own loudness —
+bass innermost, air outermost — each orbit swelling and each body brightening
+as its band speaks. The feedback texture drags curling comet tails behind
+them, and every hit flashes the whole system. Reads as celestial mechanics;
+sits beautifully over a dark background image.
+
+```bash
+avz render song.mp3 --preset orbits
+avz render song.mp3 --preset orbits --set trail=0.95 --set curl=-0.4 --set swell=2
+```
+
+**Performance:** one history sample and five bodies per pixel — comparable to
+`nebula`; on software rendering preview with `--sample 10s` before committing
+to 1080p
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `scale` | float | `1` | `0.4..2` | How wide the whole orbital system spreads. |
+| `speed` | float | `0.35` | `0..2` | How fast the innermost body circles, in revolutions per second. |
+| `swell` | float | `1` | `0..3` | How far a band's loudness pushes its body outward. |
+| `body_size` | float | `0.035` | `0.01..0.12` | How wide a body's lit core is, as a fraction of the short edge. |
+| `trail` | float | `0.9` | `0..0.97` | How much of the previous frame survives: the length of the comet tails. |
+| `curl` | float | `0.15` | `-1..1` | How hard the tails bend with the orbits; negative bends them against. |
+| `flash` | float | `1` | `0..3` | How brightly a hit flashes every body at once. |
+| `brightness` | float | `1` | `0..2` | How much light the loudness of the song puts into the system. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
