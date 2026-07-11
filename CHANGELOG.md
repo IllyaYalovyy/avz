@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`heartline`** (#53). One thin trace with an EKG blip travelling along it
+  for every hit, flux shivering the baseline — the least a visualizer can be
+  and still be alive.
+
 - **`ripples`** (#52). Rain on still water: every hit drops a ring at a
   seeded point, expanding and calming as a closed form of its age; between
   hits, only the background.

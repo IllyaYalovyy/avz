@@ -1,0 +1,6 @@
+# Golden frame hashes for the `heartline` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 0af74863436798cca6e070b3d21c775406f814392e8249c9d06b1adf3a778741
+10 68a9669f3245507337360c1b539ea47dd30708cc8ff38758bb82bb02276c0e09
+100 0ac94a8d79b4f3dc368370b2775ba8ea0bb8c591b15bdcf1f2a082ec7bc106c6

@@ -857,6 +857,34 @@ software rendering preview with `--sample 10s` before committing to 1080p
 | `tint` | float | `0.35` | `0..1` | How much each strike leans the water's palette tone. |
 | `brightness` | float | `0.6` | `0..1.5` | How much light the loudness of the song puts into the water. |
 
+## `heartline`
+
+> a quiet line low in the frame, carrying an EKG blip for every hit
+
+One thin trace, near-flat, with a small EKG complex entering at the left on
+every hit and travelling right as it shrinks; spectral flux adds a faint
+tremor so the line is never quite dead while the song plays. Between blips it
+is just a line — the least a visualizer can be and still be alive.
+
+```bash
+avz render song.mp3 --preset heartline --bg art/cover.jpg
+avz render song.mp3 --preset heartline --set line=0.5 --set travel=0.4 --set spike=0.15
+```
+
+**Performance:** each pixel replays the blips still on screen — a handful at
+most — so frame time is dominated by the resolution
+
+| Parameter | Type | Default | Range | What it does |
+|---|---|---|---|---|
+| `line` | float | `0.18` | `0.05..0.9` | How high the trace sits above the bottom of the frame. |
+| `travel` | float | `0.25` | `0.05..1` | How fast a blip crosses the frame, in frame widths per second. |
+| `fade` | float | `0.8` | `0.1..4` | How quickly a blip shrinks as it travels. |
+| `spike` | float | `0.08` | `0.01..0.3` | How tall a fresh blip is, as a fraction of the frame. |
+| `thickness` | float | `0.004` | `0.001..0.02` | How thick the trace's hot core is, as a fraction of the frame. |
+| `tremor` | float | `0.2` | `0..1` | How much spectral flux shivers the baseline between blips. |
+| `tint` | float | `0.65` | `0..1` | Where on the palette the trace's light sits. |
+| `brightness` | float | `0.7` | `0..1.5` | How much light the loudness of the song puts into the trace. |
+
 ---
 
 *This reference is held to the code by `crates/avz-core/tests/docs_reference.rs`:
