@@ -88,4 +88,10 @@ pub const PRESETS: &[Preset] = &[
         source: include_str!("aurora.wgsl"),
         schema: include_str!("aurora.json"),
     },
+    Preset {
+        name: "scope",
+        description: "an oscilloscope figure: a lissajous curve the bands bend and the beat brightens",
+        source: include_str!("scope.wgsl"),
+        schema: include_str!("scope.json"),
+    },
 ];

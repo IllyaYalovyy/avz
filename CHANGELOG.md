@@ -12,6 +12,11 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`scope`** (#38). An oscilloscope beam tracing a lissajous knot: the kick
+  and mids stretch its axes, the highs ripple a harmonic along it, hits
+  brighten the phosphor. The backlog's lissajous, drawn with segment
+  distances and no hash at all.
+
 - **`aurora`** (#37). Curtains of light hanging across the upper frame: the
   bass deepens their sway, the air band shimmers the folds, hits breathe
   light into the sky. Where `nebula` churns, `aurora` hangs.

@@ -1,0 +1,6 @@
+# Golden frame hashes for the `scope` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 1626cbaef520ebe3715340ca0d6ddc0b35f329abdbe340a6a05fbe9a3d550ec3
+10 a61d8cc740707f90ff6dae8a8eb0ab43a9630304dc39fcfe61ac576644c92e68
+100 5106482a6aadd8aae5abc6b8f694ae990b0da96780d38ae1ee3efdfed3271a2d
