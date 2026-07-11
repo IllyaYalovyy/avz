@@ -1,0 +1,6 @@
+# Golden frame hashes for the `tunnel` preset, seed 1337, synthetic features.
+# sha256 of the RGBA bytes of a 320x180 software-adapter render.
+# Regenerate: AVZ_UPDATE_GOLDEN=1 cargo test -p avz-core --test golden_frames
+0 aff0c16743fa38cdd5032158914ad9a61643d8fb7e29808b3122231a38310bce
+10 2c17c6223791577cefbc334c774443911b2c19c8338ea7d4743fccbe764f3229
+100 8d55db579d017aa4f05238fe127fef94968a085c9f46a22e882ccd10fae233c9

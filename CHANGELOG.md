@@ -12,6 +12,10 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **`tunnel`** (#34). An endless ring tunnel flown at the speed of the song:
+  the kick swells the walls, the mids stripe them, every hit lights the gates,
+  and `fog` sinks the vanishing point. From the VISION §12 backlog.
+
 - **The reference docs** (#33). `docs/PRESETS.md` documents every preset and
   every parameter — description, example commands, the full table of types,
   defaults, ranges, and performance notes — and `docs/CONFIGURATION.md`
