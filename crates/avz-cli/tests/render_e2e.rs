@@ -367,3 +367,37 @@ fn ffprobe(file: &Path, select: &[&str], entries: &str) -> String {
     );
     String::from_utf8_lossy(&output.stdout).trim().to_owned()
 }
+
+/// RFC-002 through the binary: a combined effects render — zoom pulse, slow
+/// spin, a brightness lift — encodes a playable file like any other. The
+/// pixels are pinned by `effects_render.rs`; this proves the flags reach the
+/// pass through the whole stack.
+#[test]
+fn an_effects_render_is_still_a_playable_mp4() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let song = dir.path().join("song.mp3");
+    fs::copy(fixture("tone-tagged.mp3"), &song).expect("copy the fixture");
+
+    Command::cargo_bin("avz")
+        .expect("avz binary builds")
+        .arg("render")
+        .arg(&song)
+        .args([
+            "--sample",
+            "1s",
+            "--adapter",
+            "software",
+            "--set",
+            "effects.pulse=0.1",
+            "--set",
+            "effects.spin=0.1",
+            "--set",
+            "effects.brightness=1.3",
+        ])
+        .assert()
+        .success();
+
+    let output = dir.path().join("song.mp4");
+    assert_eq!(stream(&output, "v", "codec_name"), "h264");
+    assert_eq!(stream(&output, "a", "codec_name"), "mp3");
+}

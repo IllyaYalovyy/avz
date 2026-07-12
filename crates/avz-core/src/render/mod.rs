@@ -28,6 +28,7 @@
 pub mod adapter;
 pub mod background;
 pub mod compositor;
+pub mod effects;
 pub mod feedback;
 pub mod globals;
 pub mod layer;
@@ -44,6 +45,7 @@ pub mod video;
 pub use adapter::{AdapterChoice, AdapterKind};
 pub use background::{Backdrop, Background};
 pub use compositor::Compositor;
+pub use effects::EffectsPass;
 pub use feedback::Feedback;
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
 pub use layer::Layer;

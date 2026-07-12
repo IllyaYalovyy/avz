@@ -182,6 +182,70 @@ pub fn example() -> String {
         "title = \"Cold Design\"\nartist = \"avz\"",
     ));
 
+    out.push_str("\n[effects]\n");
+    key(
+        &mut out,
+        "Post pass over the finished picture (RFC-002). Every default below is \
+         the identity: this section changes nothing until a key moves. Applied \
+         geometry first (zoom, rotation about the center), then color.",
+        "zoom",
+        &float(config.effects.zoom),
+    );
+    key(
+        &mut out,
+        "How much the kick swells the zoom; try 0.06 for a breathing picture.",
+        "pulse",
+        &float(config.effects.pulse),
+    );
+    key(
+        &mut out,
+        "Rotation, in turns per second; negative turns the other way.",
+        "spin",
+        &float(config.effects.spin),
+    );
+    key(
+        &mut out,
+        "How far the bass tilts the picture, in turns; keep it small.",
+        "sway",
+        &float(config.effects.sway),
+    );
+    key(
+        &mut out,
+        "Hue rotation, in turns: 0.5 swaps the palette's warm and cool ends.",
+        "hue",
+        &float(config.effects.hue),
+    );
+    key(
+        &mut out,
+        "Hue rotation speed, in turns per second.",
+        "hue_drift",
+        &float(config.effects.hue_drift),
+    );
+    key(
+        &mut out,
+        "Saturation: 1 is neutral, 0 is gray, 2 is vivid.",
+        "saturation",
+        &float(config.effects.saturation),
+    );
+    key(
+        &mut out,
+        "Contrast about mid-gray: 1 is neutral.",
+        "contrast",
+        &float(config.effects.contrast),
+    );
+    key(
+        &mut out,
+        "Brightness: 1 is neutral.",
+        "brightness",
+        &float(config.effects.brightness),
+    );
+    key(
+        &mut out,
+        "How much a hit lifts the brightness; try 0.15 for a pulse of light.",
+        "flash",
+        &float(config.effects.flash),
+    );
+
     out
 }
 

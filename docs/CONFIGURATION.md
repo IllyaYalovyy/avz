@@ -141,6 +141,42 @@ hold = "6s"
 fade = "0.6s"
 ```
 
+## `[effects]` — transforming the finished picture
+
+A post pass over the whole composited frame — background, visualizer, and
+text together — applied geometry first (zoom and rotation about the center),
+then color, in linear light (RFC-002). Every default is the identity: an
+absent `[effects]` section costs nothing and changes nothing, byte for byte.
+The fringe a zoom-out or rotation exposes clamps to the edge pixel, which
+reads as camera movement rather than black bars.
+
+| Key | Default | What it does |
+|---|---|---|
+| `zoom` | `1.0` | Magnification about the frame's center, `0.5`–`3`. |
+| `pulse` | `0.0` | How much the kick swells the zoom, up to `0.5`; try `0.06` for a breathing picture. |
+| `spin` | `0.0` | Rotation in turns per second, `-2`–`2`; negative turns the other way. |
+| `sway` | `0.0` | How far the bass tilts the picture, in turns, up to `±0.25`; keep it small. |
+| `hue` | `0.0` | Hue rotation in turns; `0.5` swaps the palette's warm and cool ends. |
+| `hue_drift` | `0.0` | Hue rotation speed, in turns per second, `-2`–`2`. |
+| `saturation` | `1.0` | `0` is gray, `1` neutral, up to `3`. |
+| `contrast` | `1.0` | Pivots at mid-gray, `0.2`–`3`. |
+| `brightness` | `1.0` | Plain gain, `0`–`3`. |
+| `flash` | `0.0` | How much a hit lifts the brightness, up to `2`; try `0.15`. |
+
+```toml
+[effects]
+zoom = 1.05        # a touch tighter than shot
+pulse = 0.06       # the kick breathes the picture
+spin = 0.02        # one slow turn every fifty seconds
+saturation = 1.2
+flash = 0.15       # every hit is a pulse of light
+```
+
+```bash
+# The same knobs from the command line, combined freely:
+avz render song.mp3 --preset nebula --set effects.pulse=0.08 --set effects.hue_drift=0.05
+```
+
 ## Reproducibility
 
 A config file checked into an album repo *is* the render: same mp3, same

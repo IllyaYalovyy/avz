@@ -43,6 +43,8 @@ pub struct Config {
     pub background: Background,
     /// The title/artist card.
     pub text: Text,
+    /// The post pass over the finished picture (RFC-002).
+    pub effects: Effects,
 }
 
 /// Resolved `[output]`.
@@ -124,6 +126,63 @@ pub struct Text {
     pub artist: Option<String>,
 }
 
+/// Resolved `[effects]`: the post pass over the finished picture (RFC-002).
+///
+/// Every default is the identity, and [`Effects::is_identity`] is what lets
+/// the renderer skip the pass entirely — a config that asks for nothing costs
+/// nothing and changes nothing.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Effects {
+    /// Magnification about the frame's center. 1 is none.
+    pub zoom: f32,
+    /// How much the kick swells the zoom. 0 is none.
+    pub pulse: f32,
+    /// Rotation, in turns per second. 0 is none.
+    pub spin: f32,
+    /// How far the bass tilts the picture, in turns. 0 is none.
+    pub sway: f32,
+    /// Hue rotation, in turns. 0 is none.
+    pub hue: f32,
+    /// Hue rotation speed, in turns per second. 0 is none.
+    pub hue_drift: f32,
+    /// Saturation. 1 is neutral, 0 is gray.
+    pub saturation: f32,
+    /// Contrast about mid-gray. 1 is neutral.
+    pub contrast: f32,
+    /// Brightness. 1 is neutral.
+    pub brightness: f32,
+    /// How much a hit lifts the brightness. 0 is none.
+    pub flash: f32,
+}
+
+impl Effects {
+    /// Whether this configuration transforms nothing.
+    ///
+    /// Exact comparison is deliberate: the identity values are exactly
+    /// representable, and the question is "did any layer set anything", not
+    /// "is the transform small".
+    pub fn is_identity(&self) -> bool {
+        *self == Effects::default()
+    }
+}
+
+impl Default for Effects {
+    fn default() -> Self {
+        Self {
+            zoom: 1.0,
+            pulse: 0.0,
+            spin: 0.0,
+            sway: 0.0,
+            hue: 0.0,
+            hue_drift: 0.0,
+            saturation: 1.0,
+            contrast: 1.0,
+            brightness: 1.0,
+            flash: 0.0,
+        }
+    }
+}
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -159,6 +218,7 @@ impl Default for Config {
                 title: None,
                 artist: None,
             },
+            effects: Effects::default(),
         }
     }
 }
@@ -178,6 +238,8 @@ pub struct ConfigLayer {
     pub background: BackgroundLayer,
     /// Optional `[text]` settings.
     pub text: TextLayer,
+    /// Optional `[effects]` settings.
+    pub effects: EffectsLayer,
 }
 
 /// Optional `[output]` settings.
@@ -252,6 +314,32 @@ pub struct TextLayer {
     pub title: Option<String>,
     /// See [`Text::artist`].
     pub artist: Option<String>,
+}
+
+/// Optional `[effects]` settings.
+#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct EffectsLayer {
+    /// See [`Effects::zoom`].
+    pub zoom: Option<f64>,
+    /// See [`Effects::pulse`].
+    pub pulse: Option<f64>,
+    /// See [`Effects::spin`].
+    pub spin: Option<f64>,
+    /// See [`Effects::sway`].
+    pub sway: Option<f64>,
+    /// See [`Effects::hue`].
+    pub hue: Option<f64>,
+    /// See [`Effects::hue_drift`].
+    pub hue_drift: Option<f64>,
+    /// See [`Effects::saturation`].
+    pub saturation: Option<f64>,
+    /// See [`Effects::contrast`].
+    pub contrast: Option<f64>,
+    /// See [`Effects::brightness`].
+    pub brightness: Option<f64>,
+    /// See [`Effects::flash`].
+    pub flash: Option<f64>,
 }
 
 /// The configuration sources, ordered lowest precedence first.
@@ -392,6 +480,17 @@ impl ConfigLayer {
         overlay(&mut self.text.margin, higher.text.margin);
         overlay(&mut self.text.title, higher.text.title);
         overlay(&mut self.text.artist, higher.text.artist);
+
+        overlay(&mut self.effects.zoom, higher.effects.zoom);
+        overlay(&mut self.effects.pulse, higher.effects.pulse);
+        overlay(&mut self.effects.spin, higher.effects.spin);
+        overlay(&mut self.effects.sway, higher.effects.sway);
+        overlay(&mut self.effects.hue, higher.effects.hue);
+        overlay(&mut self.effects.hue_drift, higher.effects.hue_drift);
+        overlay(&mut self.effects.saturation, higher.effects.saturation);
+        overlay(&mut self.effects.contrast, higher.effects.contrast);
+        overlay(&mut self.effects.brightness, higher.effects.brightness);
+        overlay(&mut self.effects.flash, higher.effects.flash);
     }
 
     /// Apply this layer to the built-in defaults and validate.
@@ -511,6 +610,40 @@ impl ConfigLayer {
             config.text.artist = Some(non_blank("text.artist", artist)?);
         }
 
+        if let Some(zoom) = self.effects.zoom {
+            config.effects.zoom = bounded("effects.zoom", zoom, 0.5..next_after(3.0))?;
+        }
+        if let Some(pulse) = self.effects.pulse {
+            config.effects.pulse = bounded("effects.pulse", pulse, 0.0..next_after(0.5))?;
+        }
+        if let Some(spin) = self.effects.spin {
+            config.effects.spin = bounded("effects.spin", spin, -2.0..next_after(2.0))?;
+        }
+        if let Some(sway) = self.effects.sway {
+            config.effects.sway = bounded("effects.sway", sway, -0.25..next_after(0.25))?;
+        }
+        if let Some(hue) = self.effects.hue {
+            config.effects.hue = bounded("effects.hue", hue, 0.0..next_after(1.0))?;
+        }
+        if let Some(hue_drift) = self.effects.hue_drift {
+            config.effects.hue_drift =
+                bounded("effects.hue_drift", hue_drift, -2.0..next_after(2.0))?;
+        }
+        if let Some(saturation) = self.effects.saturation {
+            config.effects.saturation =
+                bounded("effects.saturation", saturation, 0.0..next_after(3.0))?;
+        }
+        if let Some(contrast) = self.effects.contrast {
+            config.effects.contrast = bounded("effects.contrast", contrast, 0.2..next_after(3.0))?;
+        }
+        if let Some(brightness) = self.effects.brightness {
+            config.effects.brightness =
+                bounded("effects.brightness", brightness, 0.0..next_after(3.0))?;
+        }
+        if let Some(flash) = self.effects.flash {
+            config.effects.flash = bounded("effects.flash", flash, 0.0..next_after(2.0))?;
+        }
+
         Ok(config)
     }
 }
@@ -566,6 +699,12 @@ fn non_blank(key: &str, value: String) -> Result<String> {
         return Err(Error::Config(format!("`{key}` must not be blank")));
     }
     Ok(trimmed.to_owned())
+}
+
+/// The next representable value above `end`, so a documented inclusive
+/// maximum stays legal under a half-open [`bounded`] range.
+fn next_after(end: f64) -> f64 {
+    f64::from_bits(end.to_bits() + 1)
 }
 
 fn positive(key: &str, value: f64) -> Result<f32> {

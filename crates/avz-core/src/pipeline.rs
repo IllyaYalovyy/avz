@@ -31,8 +31,9 @@ use crate::config::{BackgroundSource, Config, Resolution, SampleRange};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::meta;
 use crate::render::{
-    AdapterChoice, AdapterKind, Background, BackgroundVideo, Card, CardText, Compositor, Globals,
-    Gpu, Layer, Offscreen, Preset, TextCard, VideoSettings, Visualizer, palette,
+    AdapterChoice, AdapterKind, Background, BackgroundVideo, Card, CardText, Compositor,
+    EffectsPass, Globals, Gpu, Layer, Offscreen, Preset, TextCard, VideoSettings, Visualizer,
+    palette,
 };
 use crate::{Error, Phase, Progress, Result};
 
@@ -138,6 +139,17 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
 
     let target = Offscreen::new(&gpu, resolution.width, resolution.height)?;
 
+    // The effects stage (RFC-002): built only when the config asks for one.
+    // At identity the compositor writes straight to the readback target and
+    // the render is byte-identical to a build without the stage.
+    let effects = if config.effects.is_identity() {
+        None
+    } else {
+        let flat = Layer::new(&gpu, resolution.width, resolution.height, "flattened");
+        let pass = EffectsPass::new(&gpu, &flat)?;
+        Some((flat, pass))
+    };
+
     // The layer stack, bottom to top (`VISION.md` §5.3). The background layer is
     // the palette backdrop with `background.image` fitted over it; a
     // `background.video` is a layer of its own directly above it, redrawn every
@@ -223,7 +235,19 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
         if let Some((card, layer)) = &text {
             card.draw(&gpu, layer, index, fps);
         }
-        compositor.composite(&gpu, &target);
+        match &effects {
+            None => compositor.composite(&gpu, &target),
+            Some((flat, pass)) => {
+                compositor.composite_into(&gpu, flat);
+                pass.apply(
+                    &gpu,
+                    &target,
+                    &config.effects,
+                    &timeline.frame(index),
+                    index as f32 / fps as f32,
+                );
+            }
+        }
         target.read_rgba_into(&gpu, &mut pixels)?;
         encoder.write_frame(&pixels)?;
         progress.advance(Phase::Rendering, 1);

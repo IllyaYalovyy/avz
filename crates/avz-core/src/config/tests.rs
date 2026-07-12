@@ -888,3 +888,46 @@ fn vision_toml_example() -> String {
     );
     blocks.remove(0)
 }
+
+/// RFC-002: the `[effects]` section parses, layers, and range-checks like any
+/// other, and `--set effects.zoom=1.2` is a spelling `set.rs` accepts.
+#[test]
+fn effects_keys_parse_layer_and_range_check() {
+    let file = ConfigLayer::from_toml_str("[effects]\nzoom = 1.4\nsaturation = 0.8\n")
+        .expect("effects keys parse");
+    let set = ConfigLayer::from_set_assignments(["effects.zoom=1.1"]).expect("the path exists");
+
+    let config = Sources {
+        file,
+        set,
+        ..Sources::default()
+    }
+    .resolve()
+    .expect("resolves");
+
+    assert!(
+        (config.effects.zoom - 1.1).abs() < 1e-6,
+        "--set outranks the file"
+    );
+    assert!(
+        (config.effects.saturation - 0.8).abs() < 1e-6,
+        "the file's key survives"
+    );
+    assert!(!config.effects.is_identity());
+}
+
+#[test]
+fn an_effects_value_outside_its_range_is_a_config_error() {
+    let err = ConfigLayer::from_toml_str("[effects]\nzoom = 9.0\n")
+        .expect("parses")
+        .resolve()
+        .expect_err("zoom 9 is past the documented maximum");
+    let message = err.to_string();
+    assert!(message.contains("effects.zoom"), "{message}");
+}
+
+#[test]
+fn a_bare_render_asks_for_no_effects_at_all() {
+    let config = ConfigLayer::default().resolve().expect("defaults resolve");
+    assert!(config.effects.is_identity());
+}
