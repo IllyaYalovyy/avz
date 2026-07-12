@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 use avz_core::Error;
 use avz_core::Progress as _;
 use avz_core::config::{
-    BackgroundLayer, ConfigLayer, OutputLayer, Resolution, Sources, TextLayer, VisualLayer,
+    BackgroundLayer, ConfigLayer, EffectsLayer, OutputLayer, Resolution, Sources, TextLayer,
+    VisualLayer,
 };
 use avz_core::encode::{self, DEFAULT_PROGRAM};
 use avz_core::pipeline::{self, RenderRequest, RenderSummary};
@@ -136,6 +137,8 @@ fn cli_layer(args: &RenderArgs) -> ConfigLayer {
             artist: args.artist.clone(),
             ..TextLayer::default()
         },
+        // No flag reaches `[effects]`: `--set effects.zoom=1.2` is the spelling.
+        effects: EffectsLayer::default(),
     }
 }
 

@@ -12,6 +12,14 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **The effects stage** (#54, RFC-002). A post pass over the finished picture:
+  `[effects]` grades color (hue, `hue_drift`, saturation, contrast), lifts
+  brightness (`flash` on the hits), zooms (`pulse` on the kick), and rotates
+  (`spin`, `sway` on the bass), freely combined — geometry first, then color,
+  in linear light. Every default is the identity, and an identity config skips
+  the pass byte-identically, so nothing changes for existing renders. The
+  matrices are built on the CPU per frame, where they are unit-tested.
+
 - **`heartline`** (#53). One thin trace with an EKG blip travelling along it
   for every hit, flux shivering the baseline — the least a visualizer can be
   and still be alive.

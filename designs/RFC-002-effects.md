@@ -2,7 +2,7 @@
 
 | Field | Value |
 |---|---|
-| Status | Accepted (2026-07-12) |
+| Status | Implemented (2026-07-12) |
 | Author(s) | Illya Yalovyy |
 | Supersedes | - |
 | Superseded by | - |
@@ -130,7 +130,7 @@ readback target exactly as today.
 
 ## Development Plan
 
-- [ ] **Step 1** - The effects stage: config section, CPU matrices with unit
+- [x] **Step 1** - The effects stage: config section, CPU matrices with unit
   tests, the pass, pipeline wiring, pixel-relation integration tests, docs,
   example config *(one GitHub issue)*
 

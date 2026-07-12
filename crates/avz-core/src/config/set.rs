@@ -19,7 +19,7 @@ use super::{ConfigLayer, closest};
 
 /// The tables `ConfigLayer` declares. A first segment outside this set is a
 /// preset parameter, not a mistyped section — unless it is nothing at all.
-const SECTIONS: [&str; 4] = ["output", "visual", "background", "text"];
+const SECTIONS: [&str; 5] = ["output", "visual", "background", "text", "effects"];
 
 /// Parse one `key.path=value` assignment into a layer.
 pub(super) fn layer_from_assignment(assignment: &str) -> Result<ConfigLayer> {

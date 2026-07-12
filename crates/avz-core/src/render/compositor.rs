@@ -189,10 +189,19 @@ impl Compositor {
     /// `config.output.resolution` in one function, so a mismatch is a caller bug.
     pub fn composite(&self, gpu: &Gpu, target: &Offscreen) {
         let frame = target.layout();
+        self.composite_view(gpu, target.view(), (frame.width(), frame.height()));
+    }
+
+    /// [`Compositor::composite`], into a sampleable [`Layer`] instead — the
+    /// effects stage's intermediate (RFC-002), which its pass then reads.
+    pub fn composite_into(&self, gpu: &Gpu, target: &Layer) {
+        self.composite_view(gpu, target.view(), (target.width(), target.height()));
+    }
+
+    fn composite_view(&self, gpu: &Gpu, view: &wgpu::TextureView, frame: (u32, u32)) {
         if let Some(size) = self.size {
             assert_eq!(
-                size,
-                (frame.width(), frame.height()),
+                size, frame,
                 "the layer stack was built for a different frame size",
             );
         }
@@ -207,7 +216,7 @@ impl Compositor {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("avz compositor"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target.view(),
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {
