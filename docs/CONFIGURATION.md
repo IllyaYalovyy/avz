@@ -162,6 +162,15 @@ reads as camera movement rather than black bars.
 | `contrast` | `1.0` | Pivots at mid-gray, `0.2`–`3`. |
 | `brightness` | `1.0` | Plain gain, `0`–`3`. |
 | `flash` | `0.0` | How much a hit lifts the brightness, up to `2`; try `0.15`. |
+| `fade_in` | `"0s"` | How long the clip comes up from black at its start. |
+| `fade_out` | `"0s"` | How long the clip goes down to black at its end. |
+
+The two fades are applied *last*, after the color transform, so they take the
+whole finished picture to black rather than only part of it. They measure from
+the rendered clip's own first and last frame, not from the song's: a
+`--sample 30s..40s` render fades up at the start of those ten seconds. On a clip
+too short to hold both, the fades overlap and the picture simply never reaches
+full brightness — it does not dip dark in the middle.
 
 ```toml
 [effects]

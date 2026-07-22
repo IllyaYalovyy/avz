@@ -245,6 +245,18 @@ pub fn example() -> String {
         "flash",
         &float(config.effects.flash),
     );
+    key(
+        &mut out,
+        "How long the clip comes up from black at its start; 0s cuts straight in.",
+        "fade_in",
+        &quoted(config.effects.fade_in),
+    );
+    key(
+        &mut out,
+        "How long the clip goes down to black at its end; 0s cuts straight out.",
+        "fade_out",
+        &quoted(config.effects.fade_out),
+    );
 
     out
 }

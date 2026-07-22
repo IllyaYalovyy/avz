@@ -45,7 +45,7 @@ pub mod video;
 pub use adapter::{AdapterChoice, AdapterKind};
 pub use background::{Backdrop, Background};
 pub use compositor::Compositor;
-pub use effects::EffectsPass;
+pub use effects::{ClipTime, EffectsPass};
 pub use feedback::Feedback;
 pub use globals::{GLOBALS_SIZE, Globals, PALETTE_SLOTS, PARAM_SLOTS};
 pub use layer::Layer;
