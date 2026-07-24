@@ -134,6 +134,19 @@ readback target exactly as today.
   tests, the pass, pipeline wiring, pixel-relation integration tests, docs,
   example config *(one GitHub issue)*
 
+## Follow-ups Landed in This Stage
+
+- **Clip fades** (`effects.fade_in`, `effects.fade_out`). Owner-requested after
+  this RFC was implemented, and folded in here rather than given an RFC of its
+  own: the fade is one scalar on the color transform this stage already builds,
+  and it changes no contract. Both default to `0s`, so G3 holds unchanged.
+
+  The one thing worth recording is the clock. Everything else in this stage
+  reads *song* time, so that `--sample` previews exactly what the full render
+  draws at those timestamps. A fade cannot — it belongs to the first and last
+  frame of the *clip*, which is why `EffectsPass::apply` takes a `ClipTime`
+  alongside the song time rather than deriving one from the other.
+
 ## Open Questions
 
 - [x] **Q1** - Edge fill for zoom-out/rotation? **Clamp-to-edge.** Black bars

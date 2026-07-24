@@ -153,6 +153,10 @@ pub struct Effects {
     pub brightness: f32,
     /// How much a hit lifts the brightness. 0 is none.
     pub flash: f32,
+    /// How long the clip fades up from black at its start. 0 is none.
+    pub fade_in: Seconds,
+    /// How long the clip fades down to black at its end. 0 is none.
+    pub fade_out: Seconds,
 }
 
 impl Effects {
@@ -179,6 +183,8 @@ impl Default for Effects {
             contrast: 1.0,
             brightness: 1.0,
             flash: 0.0,
+            fade_in: "0s".parse().expect("built-in duration parses"),
+            fade_out: "0s".parse().expect("built-in duration parses"),
         }
     }
 }
@@ -340,6 +346,10 @@ pub struct EffectsLayer {
     pub brightness: Option<f64>,
     /// See [`Effects::flash`].
     pub flash: Option<f64>,
+    /// See [`Effects::fade_in`].
+    pub fade_in: Option<Seconds>,
+    /// See [`Effects::fade_out`].
+    pub fade_out: Option<Seconds>,
 }
 
 /// The configuration sources, ordered lowest precedence first.
@@ -491,6 +501,8 @@ impl ConfigLayer {
         overlay(&mut self.effects.contrast, higher.effects.contrast);
         overlay(&mut self.effects.brightness, higher.effects.brightness);
         overlay(&mut self.effects.flash, higher.effects.flash);
+        overlay(&mut self.effects.fade_in, higher.effects.fade_in);
+        overlay(&mut self.effects.fade_out, higher.effects.fade_out);
     }
 
     /// Apply this layer to the built-in defaults and validate.
@@ -642,6 +654,16 @@ impl ConfigLayer {
         }
         if let Some(flash) = self.effects.flash {
             config.effects.flash = bounded("effects.flash", flash, 0.0..next_after(2.0))?;
+        }
+        // No `bounded` on the fades: `Seconds` already rejects the negative and
+        // the non-finite, and there is no upper bound worth inventing — a fade
+        // longer than the clip is a legible request, and `fade_gain` answers it
+        // by never reaching full brightness.
+        if let Some(fade_in) = self.effects.fade_in {
+            config.effects.fade_in = fade_in;
+        }
+        if let Some(fade_out) = self.effects.fade_out {
+            config.effects.fade_out = fade_out;
         }
 
         Ok(config)

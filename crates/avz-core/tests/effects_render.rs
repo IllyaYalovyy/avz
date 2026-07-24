@@ -13,11 +13,18 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use avz_core::analysis::FeatureFrame;
 use avz_core::config::{Effects, Palette};
 use avz_core::render::{
-    AdapterChoice, Backdrop, Compositor, EffectsPass, Gpu, Layer, Offscreen, palette,
+    AdapterChoice, Backdrop, ClipTime, Compositor, EffectsPass, Gpu, Layer, Offscreen, palette,
 };
 
 const WIDTH: u32 = 320;
 const HEIGHT: u32 = 180;
+
+/// A clip with no length: `fade_gain` reads it as "nothing to fade", which is
+/// what every test that is not about the fade wants.
+const NO_FADE: ClipTime = ClipTime {
+    elapsed: 0.0,
+    duration: 0.0,
+};
 
 /// One Vulkan device at a time, as `pipeline_render.rs` serializes.
 static DEVICE: Mutex<()> = Mutex::new(());
@@ -27,8 +34,13 @@ fn one_device_at_a_time() -> MutexGuard<'static, ()> {
 }
 
 /// Render the default gradient backdrop, through the effects pass when one is
-/// given, and read the frame back.
+/// given, at frame time 0 and with no fade.
 fn rendered(effects: Option<&Effects>) -> Vec<u8> {
+    rendered_at(effects, 0.0, NO_FADE)
+}
+
+/// The same, at a chosen song time and clip position.
+fn rendered_at(effects: Option<&Effects>, time: f32, clip: ClipTime) -> Vec<u8> {
     let gpu = Gpu::new(AdapterChoice::Software)
         .expect("effects tests need lavapipe: `sudo dnf install mesa-vulkan-drivers`");
 
@@ -43,7 +55,7 @@ fn rendered(effects: Option<&Effects>) -> Vec<u8> {
             let flat = Layer::new(&gpu, WIDTH, HEIGHT, "flattened");
             let pass = EffectsPass::new(&gpu, &flat).expect("the effects pass builds");
             compositor.composite_into(&gpu, &flat);
-            pass.apply(&gpu, &target, effects, &FeatureFrame::default(), 0.0);
+            pass.apply(&gpu, &target, effects, &FeatureFrame::default(), time, clip);
         }
     }
 
@@ -116,20 +128,7 @@ fn a_quarter_turn_turns_the_gradient_sideways() {
         ..Effects::default()
     };
     // time = 0 would be no turn at all; the pass is applied at time 1s.
-    let gpu_frame = {
-        let _hold = &();
-        // Rebuild `rendered` inline with time = 1.0.
-        let gpu = Gpu::new(AdapterChoice::Software).expect("lavapipe");
-        let colors = palette::resolve(&Palette::Named("ember".to_owned())).expect("`ember` ships");
-        let backdrop = Backdrop::default().layer(&gpu, WIDTH, HEIGHT, colors);
-        let compositor = Compositor::new(&gpu, &[&backdrop]).expect("one layer");
-        let target = Offscreen::new(&gpu, WIDTH, HEIGHT).expect("a frame");
-        let flat = Layer::new(&gpu, WIDTH, HEIGHT, "flattened");
-        let pass = EffectsPass::new(&gpu, &flat).expect("the pass builds");
-        compositor.composite_into(&gpu, &flat);
-        pass.apply(&gpu, &target, &effects, &FeatureFrame::default(), 1.0);
-        target.read_rgba(&gpu).expect("reads back")
-    };
+    let gpu_frame = rendered_at(Some(&effects), 1.0, NO_FADE);
 
     // A rotation in aspect-true units is a true rotation in *pixels*: a step
     // along the row samples the source a step along its column. So after a
@@ -209,4 +208,60 @@ fn zero_saturation_grays_the_picture() {
             - [r, g, b].iter().copied().min().unwrap() as i32;
         assert!(spread <= 2, "({x},{y}) should be gray, got r{r} g{g} b{b}");
     }
+}
+
+/// The clip fade, in pixels: black at the clip's first frame, black again at its
+/// last, and — once the fade is up — the very bytes an unfaded render writes.
+///
+/// The last assertion is the one that matters. A fade that only *approximately*
+/// restores the picture would mean every render carrying a fade in was subtly
+/// re-graded from end to end, and this pins that it is not: past the ramp the
+/// gain is exactly 1, and exactly 1 is a no-op.
+#[test]
+fn a_fade_takes_the_clip_from_black_and_back_to_black() {
+    let _device = one_device_at_a_time();
+    let effects = Effects {
+        fade_in: "2s".parse().expect("a duration"),
+        fade_out: "2s".parse().expect("a duration"),
+        ..Effects::default()
+    };
+    let clip_at = |elapsed: f32| ClipTime {
+        elapsed,
+        duration: 10.0,
+    };
+
+    for (elapsed, edge) in [(0.0, "first"), (10.0, "last")] {
+        let frame = rendered_at(Some(&effects), 0.0, clip_at(elapsed));
+        for (x, y) in [(WIDTH / 2, HEIGHT / 4), (WIDTH / 3, (HEIGHT * 3) / 4)] {
+            let [r, g, b, _] = pixel(&frame, x, y);
+            assert_eq!(
+                [r, g, b],
+                [0, 0, 0],
+                "the clip's {edge} frame should be black, got r{r} g{g} b{b}"
+            );
+        }
+    }
+
+    // Halfway up the ramp: dimmed, but not out.
+    let half = rendered_at(Some(&effects), 0.0, clip_at(1.0));
+    let full = rendered(Some(&effects));
+    for (x, y) in [(WIDTH / 2, HEIGHT / 4), (WIDTH / 3, (HEIGHT * 3) / 4)] {
+        for channel in 0..3 {
+            let dimmed = linear(pixel(&half, x, y)[channel]);
+            let lit = linear(pixel(&full, x, y)[channel]);
+            assert!(
+                (dimmed - lit * 0.5).abs() < 0.01,
+                "half the fade should be half the light: {dimmed} vs {lit}"
+            );
+        }
+    }
+
+    // Between the two fades the gain is exactly 1, so the pass writes exactly
+    // what it writes with no fade configured at all.
+    let held = rendered_at(Some(&effects), 0.0, clip_at(5.0));
+    let plain = rendered(Some(&Effects::default()));
+    assert_eq!(
+        held, plain,
+        "past the fade in, the picture is byte-identical to an unfaded render"
+    );
 }

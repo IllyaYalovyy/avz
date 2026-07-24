@@ -12,6 +12,15 @@ when no API moved, because a config checked into an album repo is an API.
 
 ### Added
 
+- **Clip fades.** `effects.fade_in` and `effects.fade_out` bring the video up
+  from black at its start and down to black at its end — the whole finished
+  picture, applied after the color transform. Both default to `0s`, so a clip
+  still cuts straight in and out unless asked otherwise. The fades measure
+  from the *rendered clip's* first and last frame, not the song's, so a
+  `--sample` render fades the sample; on a clip too short to hold both, they
+  overlap and the picture never quite reaches full brightness rather than
+  dipping dark in the middle.
+
 - **The effects stage** (#54, RFC-002). A post pass over the finished picture:
   `[effects]` grades color (hue, `hue_drift`, saturation, contrast), lifts
   brightness (`flash` on the hits), zooms (`pulse` on the kick), and rotates

@@ -31,7 +31,7 @@ use crate::config::{BackgroundSource, Config, Resolution, SampleRange};
 use crate::encode::{EncodeSettings, Encoder, Ffmpeg};
 use crate::meta;
 use crate::render::{
-    AdapterChoice, AdapterKind, Background, BackgroundVideo, Card, CardText, Compositor,
+    AdapterChoice, AdapterKind, Background, BackgroundVideo, Card, CardText, ClipTime, Compositor,
     EffectsPass, Globals, Gpu, Layer, Offscreen, Preset, TextCard, VideoSettings, Visualizer,
     palette,
 };
@@ -245,6 +245,14 @@ pub fn render(request: &RenderRequest<'_>, progress: &dyn Progress) -> Result<Re
                     &config.effects,
                     &timeline.frame(index),
                     index as f32 / fps as f32,
+                    // Song time above, clip time here: the fade belongs to the
+                    // video being written, so `--sample 1s..2s` fades up at its
+                    // own first frame rather than a second into an excerpt that
+                    // is already over.
+                    ClipTime {
+                        elapsed: (index - range.start) as f32 / fps as f32,
+                        duration: range.len() as f32 / fps as f32,
+                    },
                 );
             }
         }

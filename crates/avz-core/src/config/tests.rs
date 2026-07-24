@@ -927,6 +927,36 @@ fn an_effects_value_outside_its_range_is_a_config_error() {
 }
 
 #[test]
+fn the_clip_fades_parse_as_durations_and_survive_precedence() {
+    let file = ConfigLayer::from_toml_str("[effects]\nfade_in = \"1.5s\"\nfade_out = \"2s\"\n")
+        .expect("the fade keys parse");
+    let set =
+        ConfigLayer::from_set_assignments(["effects.fade_out=250ms"]).expect("the path exists");
+
+    let config = Sources {
+        file,
+        set,
+        ..Sources::default()
+    }
+    .resolve()
+    .expect("resolves");
+
+    assert_close(config.effects.fade_in.as_secs_f64() as f32, 1.5);
+    assert_close(config.effects.fade_out.as_secs_f64() as f32, 0.25);
+    // A fade is an effect: the pass has to be built, or the fade does nothing.
+    assert!(!config.effects.is_identity());
+}
+
+#[test]
+fn a_bare_number_is_not_a_fade() {
+    // The same rule every other duration follows: `fade_in = 2` could be two
+    // seconds or two frames, so it is rejected rather than guessed.
+    let err = ConfigLayer::from_toml_str("[effects]\nfade_in = 2\n")
+        .expect_err("a bare number is not a duration");
+    assert!(err.to_string().contains("fade_in"), "{err}");
+}
+
+#[test]
 fn a_bare_render_asks_for_no_effects_at_all() {
     let config = ConfigLayer::default().resolve().expect("defaults resolve");
     assert!(config.effects.is_identity());

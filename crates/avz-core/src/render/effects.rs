@@ -10,7 +10,9 @@
 //! Fixed order, documented in `docs/CONFIGURATION.md`: geometry first (zoom
 //! and rotation about the frame's center, in aspect-true coordinates,
 //! clamp-to-edge at the fringe), then color (contrast, saturation, hue,
-//! brightness, composed into one 3×3 + offset, applied in linear light).
+//! brightness, composed into one 3×3 + offset, applied in linear light), and
+//! last the clip fade — [`fade_gain`] scaling that whole transform, so the
+//! picture comes up from and goes down to black around everything else.
 //!
 //! Identity is free: when the config asks for nothing, [`config::Effects::is_identity`]
 //! is true, the pass is never built, and the render is byte-identical to a
@@ -103,6 +105,53 @@ pub fn color_transform(effects: &EffectsConfig, features: &FeatureFrame, time: f
         matrix[2][2],
         offset[2],
     ]
+}
+
+/// Where a frame sits in the *clip* — the video being written — rather than in
+/// the song.
+///
+/// The distinction is the whole point of this type. `spin` and `hue_drift` read
+/// song time, so that `--sample 1s..2s` previews exactly what the full render
+/// draws at those timestamps. A fade cannot: it belongs to the clip's own first
+/// and last frames, so a sampled second fades up at *its* start, not at the
+/// song's.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ClipTime {
+    /// Seconds since the clip's first frame.
+    pub elapsed: f32,
+    /// The clip's whole length, in seconds.
+    pub duration: f32,
+}
+
+/// The clip fade's gain for one frame: 0 at the first frame of a fade in, 1 once
+/// it is up, and back to 0 at the clip's last frame under a fade out.
+///
+/// The two ramps combine with `min`, not by multiplying. On a clip shorter than
+/// `fade_in + fade_out` the windows overlap, and multiplying would darken the
+/// middle twice over — the picture would dip toward black exactly where it
+/// should be brightest. Taking the smaller ramp keeps the curve up-then-down and
+/// respects both fades.
+pub fn fade_gain(effects: &EffectsConfig, clip: ClipTime) -> f32 {
+    let fade_in = effects.fade_in.as_secs_f64() as f32;
+    let fade_out = effects.fade_out.as_secs_f64() as f32;
+
+    // A clip with no length has no start to fade from and no end to fade to.
+    if clip.duration <= 0.0 {
+        return 1.0;
+    }
+
+    let up = if fade_in > 0.0 {
+        clip.elapsed / fade_in
+    } else {
+        1.0
+    };
+    let down = if fade_out > 0.0 {
+        (clip.duration - clip.elapsed) / fade_out
+    } else {
+        1.0
+    };
+
+    up.min(down).clamp(0.0, 1.0)
 }
 
 /// `k`·I.
@@ -319,9 +368,16 @@ impl EffectsPass {
         effects: &EffectsConfig,
         features: &FeatureFrame,
         time: f32,
+        clip: ClipTime,
     ) {
         let uv = uv_transform(effects, features, time);
-        let color = color_transform(effects, features, time);
+        // The fade scales the finished color transform — matrix *and* offsets,
+        // so it scales the transform's output rather than only its slope. That
+        // makes it the last thing applied, after contrast, saturation, hue, and
+        // brightness, which is what "fade the picture to black" means. No shader
+        // change: the uniform block is the same twelve floats, smaller.
+        let gain = fade_gain(effects, clip);
+        let color = color_transform(effects, features, time).map(|float| float * gain);
         let layout = target.layout();
         let aspect = layout.width() as f32 / layout.height() as f32;
 
@@ -577,5 +633,100 @@ mod tests {
         let expected = [saturated[0] * 1.2, saturated[1] * 1.2, saturated[2] * 1.2];
 
         near3(apply_color(&composed, sample), expected);
+    }
+
+    fn clip(elapsed: f32, duration: f32) -> ClipTime {
+        ClipTime { elapsed, duration }
+    }
+
+    fn seconds(text: &str) -> crate::config::Seconds {
+        text.parse().expect("a test duration parses")
+    }
+
+    #[test]
+    fn no_fade_is_a_gain_of_one() {
+        let effects = identity();
+        for elapsed in [0.0, 0.5, 5.0, 10.0] {
+            near(fade_gain(&effects, clip(elapsed, 10.0)), 1.0);
+        }
+    }
+
+    #[test]
+    fn a_clip_fade_makes_the_config_ask_for_a_pass() {
+        // Without this, a config whose only effect is a fade would be skipped
+        // as the identity and the fade would silently do nothing.
+        let mut faded = identity();
+        faded.fade_in = seconds("1s");
+        assert!(!faded.is_identity());
+    }
+
+    #[test]
+    fn the_fade_in_ramps_from_black_to_full() {
+        let mut effects = identity();
+        effects.fade_in = seconds("2s");
+
+        near(fade_gain(&effects, clip(0.0, 10.0)), 0.0);
+        near(fade_gain(&effects, clip(1.0, 10.0)), 0.5);
+        near(fade_gain(&effects, clip(2.0, 10.0)), 1.0);
+        // Up is up: the ramp does not keep climbing past its window.
+        near(fade_gain(&effects, clip(7.0, 10.0)), 1.0);
+    }
+
+    #[test]
+    fn the_fade_out_lands_on_black_at_the_clips_end() {
+        let mut effects = identity();
+        effects.fade_out = seconds("2s");
+
+        near(fade_gain(&effects, clip(0.0, 10.0)), 1.0);
+        near(fade_gain(&effects, clip(8.0, 10.0)), 1.0);
+        near(fade_gain(&effects, clip(9.0, 10.0)), 0.5);
+        near(fade_gain(&effects, clip(10.0, 10.0)), 0.0);
+    }
+
+    #[test]
+    fn overlapping_fades_take_the_smaller_gain() {
+        // Three seconds each on a four-second clip: the windows overlap for two
+        // seconds in the middle. Multiplying the ramps would darken that middle
+        // — the brightest part of the clip — so `fade_gain` takes the min.
+        let mut effects = identity();
+        effects.fade_in = seconds("3s");
+        effects.fade_out = seconds("3s");
+
+        near(fade_gain(&effects, clip(0.0, 4.0)), 0.0);
+        near(fade_gain(&effects, clip(1.0, 4.0)), 1.0 / 3.0);
+        // The crossover, and the clip's brightest frame.
+        near(fade_gain(&effects, clip(2.0, 4.0)), 2.0 / 3.0);
+        near(fade_gain(&effects, clip(3.0, 4.0)), 1.0 / 3.0);
+        near(fade_gain(&effects, clip(4.0, 4.0)), 0.0);
+    }
+
+    #[test]
+    fn a_zero_length_clip_has_nothing_to_fade() {
+        let mut effects = identity();
+        effects.fade_in = seconds("1s");
+        effects.fade_out = seconds("1s");
+        near(fade_gain(&effects, clip(0.0, 0.0)), 1.0);
+    }
+
+    #[test]
+    fn a_fade_scales_the_whole_color_transform() {
+        // Contrast puts a non-zero offset in the transform's fourth column; the
+        // fade has to scale that too, or a faded frame would settle toward
+        // mid-gray instead of going to black.
+        let mut effects = identity();
+        effects.contrast = 1.4;
+        effects.brightness = 1.2;
+        let transform = color_transform(&effects, &FeatureFrame::default(), 0.0);
+
+        let sample = [0.3f32, 0.6, 0.1];
+        let lit = apply_color(&transform, sample);
+
+        for gain in [0.0f32, 0.25, 0.5, 1.0] {
+            let faded = transform.map(|float| float * gain);
+            near3(
+                apply_color(&faded, sample),
+                [lit[0] * gain, lit[1] * gain, lit[2] * gain],
+            );
+        }
     }
 }
